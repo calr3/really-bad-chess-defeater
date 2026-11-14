@@ -117,3 +117,33 @@ dotnet run -c Release --project harness -- 0,30,60 2 1000
 
 `harness/Program.cs` generates ranked boards with the game's own generator, gives the
 exploiter White and `cgEngine` (depths 3/5/5) Black, and plays to a result.
+
+## Results
+
+Run with `dotnet run -c Release --project harness -- 0,10,20,30,40,50,60,70,80,90,100 3 5000`: 33
+ranked boards from the game's own generator, three seeds per rank. Rank 0 gives White the
+stronger army; rank 100 gives Black about 30 points more material, for example several extra
+queens. The exploiter played White and `cgEngine` played Black at the shipped depths 3/5/5.
+
+| rank | games | won | moves to win |
+|---:|---:|---:|---|
+| 0 | 3 | 3 | 9, 10, 7 |
+| 10 | 3 | 3 | 8, 19, 6 |
+| 20 | 3 | 3 | 4, 5, 10 |
+| 30 | 3 | 3 | 9, 15, 7 |
+| 40 | 3 | 3 | 11, 11, 11 |
+| 50 | 3 | 3 | 9, 8, 10 |
+| 60 | 3 | 3 | 8, 14, 12 |
+| 70 | 3 | 3 | 10, 20, 15 |
+| 80 | 3 | 3 | 17, 10, 14 |
+| 90 | 3 | 3 | 19, 13, 32 |
+| 100 | 3 | 3 | 14, 30, 19 |
+| **all** | **33** | **33** | **mean 12.1, max 32** |
+
+Each game took 0.5–7 minutes on 4 cores, almost all of it spent running the model. The win
+condition used is the game's: the side to move with no legal move loses, whether mated or
+stalemated.
+
+Caveat: the port was checked by reading the disassembly and by standard perft counts (20 / 400
+/ 8902 from the initial position). It was not checked move-for-move against the running game,
+so any decompilation error would make the model diverge from the real AI in some positions.
