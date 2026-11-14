@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <Optimize>true</Optimize>
+    <NoWarn>CS0414;CS0169;CS0649;CS0162;CS0219;CS8981</NoWarn>
+    <RootNamespace>ReallyBadChess</RootNamespace>
+  </PropertyGroup>
+</Project>
