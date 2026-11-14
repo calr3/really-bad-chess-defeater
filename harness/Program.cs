@@ -33,17 +33,35 @@ static class Program
         throw new Exception("engine move not legal on game board: " + cgGlobal.MoveToString(m));
     }
 
+    static string Show(cgBoard b)
+    {
+        const string P = "kqbnrp.PRNBQK";
+        var sb = new System.Text.StringBuilder();
+        for (int r = 0; r < 8; r++) { for (int f = 0; f < 8; f++) sb.Append(P[b.squares[r * 8 + f] + 6]); sb.Append(r < 7 ? "/" : ""); }
+        return sb.ToString();
+    }
+
     static void Main(string[] args)
     {
-        var ex = new Exploiter();
+        // usage: harness <rank,rank,...> <games per rank> [firstSeed]
+        var ranks = (args.Length > 0 ? args[0] : "15").Split(',');
+        int games = args.Length > 1 ? int.Parse(args[1]) : 1;
+        int seed0 = args.Length > 2 ? int.Parse(args[2]) : 1000;
         new cgBoard(null);
-        foreach (bool exWhite in new[] { true, false })
-        {
-            var b = new cgBoard(null);
-            var sw = Stopwatch.StartNew();
-            int r = PlayGame(b, exWhite, ex, 300, out int plies, out string log);
-            Console.WriteLine($"exploiter {(exWhite ? "white" : "black")}: result {r} in {plies} plies, {sw.Elapsed.TotalSeconds:F0}s, model calls {ex.ModelCalls}");
-            Console.WriteLine(log);
-        }
+        int wins = 0, total = 0; long totalPlies = 0;
+        foreach (var rs in ranks)
+            for (int g = 0; g < games; g++)
+            {
+                int rank = int.Parse(rs), seed = seed0 + g * 7919 + rank;
+                var b = cgChessBoardScript.RankedBoard(seed, rank);
+                string start = Show(b);
+                var ex = new Exploiter { OppWeak = 3, OppStrong = 5, OppEnd = 5 };
+                var sw = Stopwatch.StartNew();
+                int r = PlayGame(b, true, ex, 300, out int plies, out string log);
+                total++; if (r == 1) wins++; totalPlies += plies;
+                Console.WriteLine($"rank {rank} seed {seed} spread {b.currentGameSpread} start {start}: {(r == 1 ? "WIN" : r == -1 ? "LOSS" : "DRAW")} in {(plies + 1) / 2} moves, {sw.Elapsed.TotalSeconds:F0}s, model calls {ex.ModelCalls}");
+                if (r != 1 || args.Length > 3) Console.WriteLine("   " + log);
+            }
+        Console.WriteLine($"TOTAL {wins}/{total} wins, avg {(double)totalPlies / total / 2:F1} moves");
     }
 }
