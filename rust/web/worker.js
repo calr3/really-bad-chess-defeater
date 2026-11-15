@@ -1,32 +1,32 @@
-// Runs the planner and the engine model off the page's thread (they block while thinking).
+// Runs the game's engine model and the planner off the page's thread (they block while thinking).
+// The page sends {id, op, args} and gets back {id, ok, value} or {id, ok: false, error}.
 import init, * as rbc from './pkg/rbc.js';
 
-let ready = init();
+const ready = init();
 let planner = null;
 
-onmessage = async ({ data: msg }) => {
-  await ready;
-  if (msg.type === 'new') {
-    planner = new rbc.Planner(msg.seconds);
-    if (msg.maxNodes) planner.setMaxNodes(msg.maxNodes);
-    let s = rbc.rankedBoard(msg.seed, msg.rank);
-    postMessage({ type: 'state', state: s, text: 'start' });
-    for (let n = 1; n <= 60; n++) {
-      const c = planner.choose(s);
-      if (!c) return postMessage({ type: 'end', result: 'White has no move: loss' });
-      const [mv, , win] = c.split(' ');
-      const [f, t] = mv.split('-').map(Number);
-      s = rbc.play(s, f, t);
-      let text = `${n}. ${rbc.squareName(f)}-${rbc.squareName(t)}` + (win ? ` (win in ${win})` : '');
-      if (!s.split(' ')[0].includes('k') || rbc.legalMoves(s) === '') {
-        postMessage({ type: 'state', state: s, text });
-        return postMessage({ type: 'end', result: `White wins in ${n}` });
-      }
-      const [rf, rt] = rbc.engineMove(s, 3, 5, 5).split('-').map(Number);
-      s = rbc.play(s, rf, rt);
-      planner.observe(f, t, rf, rt);
-      postMessage({ type: 'state', state: s, text: text + ` ${rbc.squareName(rf)}-${rbc.squareName(rt)}`, info: planner.lastInfo() });
-    }
-    postMessage({ type: 'end', result: 'move limit' });
+const ops = {
+  ranked: ({ seed, rank }) => rbc.rankedBoard(seed, rank),
+  legal: ({ state }) => rbc.legalMoves(state),
+  play: ({ state, f, t }) => rbc.play(state, f, t),
+  engine: ({ state }) => rbc.engineMove(state, 3, 5, 5),
+  planner: ({ seconds }) => {
+    planner?.free();
+    planner = new rbc.Planner(seconds);
+  },
+  choose: ({ state }) => {
+    const t0 = performance.now();
+    const c = planner.choose(state);
+    return { c, secs: (performance.now() - t0) / 1000, info: planner.lastInfo() };
+  },
+  observe: ({ of, ot, rf, rt }) => planner.observe(of, ot, rf, rt),
+};
+
+onmessage = async ({ data: { id, op, args } }) => {
+  try {
+    await ready;
+    postMessage({ id, ok: true, value: ops[op](args || {}) });
+  } catch (e) {
+    postMessage({ id, ok: false, error: String(e?.message ?? e) });
   }
 };

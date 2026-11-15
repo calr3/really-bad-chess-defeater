@@ -2,60 +2,593 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RBC planner (wasm)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Really Bad Chess Defeater</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --light: #eee; --dark: #b8b8b8; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #e8e8e8; --muted: #999; --light: #3a3a3a; --dark: #262626; } }
-  body { background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; }
-  main { max-width: 640px; margin: 0 auto; }
-  #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: min(100%, 360px); aspect-ratio: 1; margin: 12px 0; }
-  #board div { display: flex; align-items: center; justify-content: center; font-size: min(7vw, 30px); }
-  label { margin-right: 12px; }
-  input { width: 5em; }
-  #log { color: var(--muted); font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+  /* Layout: board on the left, setup or game panel on the right; stacks to one column on phones. */
+  :root {
+    --bg: #f3f5f4; --surface: #ffffff; --fg: #18211e; --muted: #5d6b66; --line: #d6ddda;
+    --sq-light: #e4ebe7; --sq-dark: #7f9a8f; --accent: #2d6cdf; --accent-fg: #ffffff; --reply: #d9822b;
+    --hl: rgba(240, 196, 64, .55); --sel: rgba(45, 108, 223, .45); --dot: rgba(24, 33, 30, .32);
+    --good: #1f8a4c; --bad: #c0392b; --piece-w: #ffffff; --piece-b: #111614; --piece-edge: #111614;
+    --display: "Space Grotesk", system-ui, sans-serif;
+    --body: "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121715; --surface: #1a211e; --fg: #e3ebe7; --muted: #95a59f; --line: #2c3632;
+      --sq-light: #a9bbb3; --sq-dark: #5b7469; --accent: #6b9cf5; --accent-fg: #0d1220; --reply: #f0a052;
+      --hl: rgba(240, 196, 64, .6); --sel: rgba(107, 156, 245, .55); --dot: rgba(10, 14, 12, .4);
+      --good: #4cc27d; --bad: #ef6b5b; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121715; --surface: #1a211e; --fg: #e3ebe7; --muted: #95a59f; --line: #2c3632;
+    --sq-light: #a9bbb3; --sq-dark: #5b7469; --accent: #6b9cf5; --accent-fg: #0d1220; --reply: #f0a052;
+    --hl: rgba(240, 196, 64, .6); --sel: rgba(107, 156, 245, .55); --dot: rgba(10, 14, 12, .4);
+    --good: #4cc27d; --bad: #ef6b5b; color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 24px 40px;
+  }
+  main { max-width: 1000px; margin: 0 auto; display: grid; gap: 20px; }
+  header h1 { font: 700 clamp(1.6rem, 4vw, 2.2rem)/1.1 var(--display); margin: 0 0 6px; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); max-width: 65ch; }
+  h2 { font: 700 1.15rem/1.2 var(--display); margin: 0; }
+  .play { display: grid; grid-template-columns: minmax(0, 480px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 780px) { .play { grid-template-columns: minmax(0, 1fr); } }
+
+  .boardwrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px; }
+  #boardbox { position: relative; aspect-ratio: 1; width: 100%; max-width: 100%; }
+  #board {
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    position: absolute; inset: 0; border-radius: 6px; overflow: hidden;
+    box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(0,0,0,.12);
+  }
+  #board button {
+    all: unset; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer;
+    font-size: clamp(20px, 7.5vw, 46px); line-height: 1; user-select: none;
+  }
+  #board button:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; z-index: 2; }
+  #board .l { background: var(--sq-light); }
+  #board .d { background: var(--sq-dark); }
+  #board .hl::after, #board .sel::after { content: ""; position: absolute; inset: 0; }
+  #board .hl::after { background: var(--hl); }
+  #board .sel::after { background: var(--sel); }
+  #board .target::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); z-index: 2; }
+  #board .target.occ::before { width: 86%; height: 86%; background: transparent; border: 4px solid var(--dot); box-sizing: border-box; }
+  .pc { position: relative; z-index: 1; }
+  .pc.w { color: var(--piece-w); -webkit-text-stroke: 1.2px var(--piece-edge); paint-order: stroke fill; }
+  .pc.b { color: var(--piece-b); }
+  #arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+  #arrows .ours { stroke: var(--accent); fill: var(--accent); opacity: .85; }
+  #arrows .reply { stroke: var(--reply); fill: var(--reply); opacity: .9; }
+  .ranks, .files { display: grid; font: 500 11px var(--mono); color: var(--muted); }
+  .ranks { grid-template-rows: repeat(8, 1fr); align-items: center; padding-right: 2px; }
+  .files { grid-column: 2; grid-template-columns: repeat(8, 1fr); text-align: center; }
+
+  .side { display: grid; gap: 16px; min-width: 0; align-content: start; }
+  .panel { display: grid; gap: 14px; min-width: 0; }
+  .muted { color: var(--muted); margin: 0; }
+  .note { color: var(--muted); font-size: 13px; margin: 0; max-width: 65ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .label { font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .field { display: grid; gap: 4px; }
+  #palette { display: grid; grid-template-columns: repeat(7, minmax(0, 44px)); gap: 6px; }
+  #palette button {
+    all: unset; box-sizing: border-box; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    font-size: 28px; line-height: 1; border-radius: 6px; border: 1px solid var(--line); background: var(--sq-light);
+  }
+  #palette button.erase { font: 600 11px var(--body); color: #18211e; text-align: center; }
+  #palette button[aria-pressed="true"] { border: 2px solid var(--accent); box-shadow: 0 0 0 2px var(--sel); }
+  #palette button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=number], input[type=text] {
+    font: 500 14px var(--mono); padding: 7px 9px; border-radius: 6px; box-sizing: border-box;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg); min-width: 0;
+  }
+  input[type=number] { width: 6.5em; }
+  input[type=text] { width: 100%; }
+  .choice { display: flex; gap: 6px; align-items: center; }
+  button.btn {
+    font: 600 14px var(--body); padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: var(--accent-fg);
+  }
+  button.btn.big { font-size: 16px; padding: 10px 20px; }
+  button.btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  :is(button.btn, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  details > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
+  details > div { padding: 0 12px 12px; display: grid; gap: 10px; }
+  .error { color: var(--bad); font-weight: 500; margin: 0; }
+
+  .prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
+  .status { display: flex; gap: 10px; align-items: center; }
+  .pill { font: 600 12px var(--body); letter-spacing: .04em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.ours { color: var(--accent); border-color: var(--accent); }
+  .pill.reply { color: var(--reply); border-color: var(--reply); }
+  .pill.win { color: var(--good); border-color: var(--good); }
+  .pill.loss { color: var(--bad); border-color: var(--bad); }
+  .say { font: 600 1.25rem/1.3 var(--display); margin: 0; }
+  .say .mv { font-family: var(--mono); font-weight: 500; }
+  .win { color: var(--good); font-weight: 600; }
+  .warn { color: var(--reply); font-size: 14px; margin: 0; }
+  .moves { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: 320px; }
+  table { border-collapse: collapse; width: 100%; font: 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+  th { font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+  td { padding: 5px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.n { color: var(--muted); }
+  td .off { color: var(--reply); }
+  .empty { padding: 14px 12px; color: var(--muted); font: 14px var(--body); }
 </style>
 </head>
 <body>
+
 <main>
-  <h1>Really Bad Chess planner</h1>
-  <p>The planner (White) plays the game's engine (Black) on a ranked board, all in WebAssembly in a worker.</p>
-  <form id="f">
-    <label>Seed <input id="seed" type="number" value="5000"></label>
-    <label>Rank <input id="rank" type="number" value="0" min="0" max="120"></label>
-    <label>Seconds/move <input id="secs" type="number" value="10" min="1"></label>
-    <button>Play</button>
-  </form>
-  <div id="board"></div>
-  <div id="result"></div>
-  <div id="log"></div>
+  <header>
+    <h1>Really Bad Chess Defeater</h1>
+    <p>Set up the board your game is showing. The planner tells you what to play as White, and you enter the engine's replies as they happen. Everything runs in WebAssembly in your browser.</p>
+  </header>
+
+  <section class="play">
+    <div class="boardwrap">
+      <div class="ranks" aria-hidden="true"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span></div>
+      <div id="boardbox">
+        <div id="board" role="grid" aria-label="Chess board"></div>
+        <svg id="arrows" viewBox="0 0 8 8" aria-hidden="true"></svg>
+      </div>
+      <div class="files" aria-hidden="true"><span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span></div>
+    </div>
+
+    <div class="side">
+      <div id="setup" class="panel">
+        <h2>Set up the board</h2>
+        <p class="muted">Pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
+        <div id="palette" role="toolbar" aria-label="Pieces"></div>
+        <div class="row">
+          <button class="btn secondary" id="clear" type="button">Empty board</button>
+          <button class="btn secondary" id="standard" type="button">Standard chess</button>
+        </div>
+        <div class="row" role="radiogroup" aria-label="Side to move">
+          <span class="label">To move</span>
+          <label class="choice"><input type="radio" name="side" id="sideW" value="w" checked> White</label>
+          <label class="choice"><input type="radio" name="side" id="sideB" value="b"> Black</label>
+        </div>
+        <div class="row">
+          <label class="choice"><input type="checkbox" id="castleW" checked> White can still castle</label>
+          <label class="choice"><input type="checkbox" id="castleB" checked> Black can still castle</label>
+        </div>
+        <p class="note">Castling counts only with the king on its starting square and a rook in the corner. Untick it if that king or rook has already moved.</p>
+        <details>
+          <summary>Load a ranked board from a seed</summary>
+          <div>
+            <div class="row">
+              <div class="field"><label class="label" for="seed">Seed</label><input id="seed" type="number" value="5000"></div>
+              <div class="field"><label class="label" for="rank">Rank</label><input id="rank" type="number" value="0" min="0" max="120"></div>
+              <button class="btn secondary" id="loadSeed" type="button" style="align-self:end">Load</button>
+            </div>
+          </div>
+        </details>
+        <details>
+          <summary>Paste or copy a position</summary>
+          <div>
+            <input type="text" id="posText" spellcheck="false" autocomplete="off" aria-label="Position text">
+            <div class="row">
+              <button class="btn secondary" id="loadText" type="button">Load pasted position</button>
+              <button class="btn secondary" id="copyText" type="button">Copy</button>
+            </div>
+            <p class="note">Takes a FEN (such as <code>rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq</code>), 64 squares from a8 to h1 using <code>.</code> for empty, or this tool's own position text.</p>
+          </div>
+        </details>
+        <p id="setupError" class="error" hidden></p>
+        <div class="row">
+          <button class="btn big" id="start" type="button">Start</button>
+          <div class="field"><label class="label" for="secs">Seconds per move</label><input id="secs" type="number" value="20" min="1" max="600"></div>
+        </div>
+      </div>
+
+      <div id="game" class="panel" hidden>
+        <div class="prompt">
+          <div class="status"><span id="pill" class="pill">Ready</span><span id="phaseText" class="muted"></span></div>
+          <p id="say" class="say"></p>
+          <p id="warn" class="warn" hidden></p>
+          <div class="row" id="actions"></div>
+          <p id="hint" class="note"></p>
+        </div>
+        <div class="row">
+          <button class="btn secondary" id="undo" type="button">Undo</button>
+          <button class="btn secondary" id="edit" type="button">Edit board</button>
+          <div class="field"><label class="label" for="secs2">Seconds per move</label><input id="secs2" type="number" value="20" min="1" max="600"></div>
+          <label class="choice" style="align-self:end"><input type="checkbox" id="auto"> Auto-play both sides</label>
+        </div>
+        <div class="moves">
+          <table>
+            <thead><tr><th>#</th><th>White (you)</th><th>Black (engine)</th></tr></thead>
+            <tbody id="log"></tbody>
+          </table>
+          <div id="empty" class="empty">No moves yet.</div>
+        </div>
+        <p class="note">The planner models the game's engine exactly, so its prediction of each reply should match what the game plays. If a reply differs, check the board: a misplaced piece or wrong castling rights changes the engine's choice.</p>
+      </div>
+    </div>
+  </section>
 </main>
+
 <script type="module">
-const glyph = { k: '♚', q: '♛', b: '♝', n: '♞', r: '♜', p: '♟', K: '♔', Q: '♕', B: '♗', N: '♘', R: '♖', P: '♙', '.': '' };
-const board = document.getElementById('board'), log = document.getElementById('log'), result = document.getElementById('result');
-function show(state) {
-  board.innerHTML = '';
-  [...state.split(' ')[0]].forEach((c, i) => {
-    const d = document.createElement('div');
-    d.style.background = ((i >> 3) + (i & 7)) % 2 ? 'var(--dark)' : 'var(--light)';
-    d.textContent = glyph[c];
-    board.append(d);
-  });
-}
-let worker;
-document.getElementById('f').onsubmit = e => {
-  e.preventDefault();
+const START = 'rnbqkbnrpppppppp................................PPPPPPPPRNBQKBNR';
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const NAME = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
+const $ = id => document.getElementById(id);
+const sqName = i => 'abcdefgh'[i & 7] + (8 - (i >> 3));
+const mvText = m => `${sqName(m.f)}–${sqName(m.t)}`;
+const same = (a, b) => !!a && !!b && a.f === b.f && a.t === b.t;
+const secs = () => Math.min(600, Math.max(1, +$('secs').value || 20));
+
+// ---- worker calls ----
+let worker = null, seq = 0;
+const pending = new Map();
+function startWorker() {
   worker?.terminate();
+  for (const p of pending.values()) p.reject(new Error('stopped'));
+  pending.clear();
   worker = new Worker('./worker.js', { type: 'module' });
-  log.textContent = ''; result.textContent = 'thinking…';
-  worker.onmessage = ({ data: m }) => {
-    if (m.type === 'state') { show(m.state); if (m.text !== 'start') log.textContent += m.text + '\n'; }
-    if (m.type === 'end') result.textContent = m.result;
+  worker.onmessage = ({ data }) => {
+    const p = pending.get(data.id);
+    if (!p) return;
+    pending.delete(data.id);
+    data.ok ? p.resolve(data.value) : p.reject(new Error(data.error));
   };
-  const q = new URLSearchParams(location.search);
-  worker.postMessage({ type: 'new', seed: +seed.value, rank: +rank.value, seconds: +secs.value, maxNodes: +(q.get('maxNodes') || 0) });
-};
-show('rbqnkbnrpppppppp................................PPPPPPPPRNBQKBNR');
+  worker.onerror = e => showError('The engine could not start: ' + (e.message || 'unknown error'));
+}
+const call = (op, args) => new Promise((resolve, reject) => {
+  const id = ++seq;
+  pending.set(id, { resolve, reject });
+  worker.postMessage({ id, op, args });
+});
+
+// ---- state ----
+let mode = 'setup';
+const edit = { sq: [...START], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null };
+let game = null;
+
+function buildState() {
+  if (edit.full) return edit.full;
+  const sq = edit.sq.join('');
+  const n = edit.sq.filter(c => c !== '.').length;
+  const wk = edit.castleW && sq[60] === 'K' ? 0 : 1;
+  const bk = edit.castleB && sq[4] === 'k' ? 0 : 1;
+  return `${sq} ${edit.side} 0 0 0 0 0 0 ${wk} ${bk} ${n} 255 255`;
+}
+function loadIntoEditor(text) {
+  const parts = text.trim().split(/\s+/);
+  let p = parts[0] || '';
+  p = p.replace(/[1-8]/g, d => '.'.repeat(+d)).replace(/\//g, '');
+  if (p.length !== 64 || /[^kqbnrpKQBNRP.]/.test(p)) throw new Error('That position has the wrong number of squares or an unknown piece letter.');
+  edit.sq = [...p];
+  edit.side = parts[1] === 'b' ? 'b' : 'w';
+  edit.full = null;
+  if (parts.length === 13) {
+    edit.castleW = parts[2] === '0' && parts[8] === '0';
+    edit.castleB = parts[3] === '0' && parts[9] === '0';
+    edit.full = parts.join(' ');
+  } else if (parts[2] && /^[KQkq-]+$/.test(parts[2])) {
+    edit.castleW = /[KQ]/.test(parts[2]);
+    edit.castleB = /[kq]/.test(parts[2]);
+  } else {
+    edit.castleW = edit.castleB = true;
+  }
+}
+function editorChanged() { edit.full = null; $('setupError').hidden = true; render(); }
+
+// ---- rendering ----
+function pieceSpan(c) {
+  const s = document.createElement('span');
+  s.className = 'pc ' + (c === c.toUpperCase() ? 'w' : 'b');
+  s.textContent = GLYPH[c.toLowerCase()];
+  return s;
+}
+function arrow(m, cls) {
+  const x1 = (m.f & 7) + .5, y1 = (m.f >> 3) + .5, x2 = (m.t & 7) + .5, y2 = (m.t >> 3) + .5;
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
+  const hx = x2 - ux * .42, hy = y2 - uy * .42, px = -uy * .24, py = ux * .24;
+  const f = v => v.toFixed(3);
+  return `<g class="${cls}"><line x1="${f(x1 + ux * .15)}" y1="${f(y1 + uy * .15)}" x2="${f(hx)}" y2="${f(hy)}" stroke-width=".17" stroke-linecap="round"/>` +
+    `<polygon points="${f(x2 - ux * .08)},${f(y2 - uy * .08)} ${f(hx + px)},${f(hy + py)} ${f(hx - px)},${f(hy - py)}" stroke="none"/></g>`;
+}
+function renderBoard() {
+  const squares = mode === 'setup' ? edit.sq : [...game.state.split(' ')[0]];
+  const hl = mode === 'game' && game.last ? [game.last.f, game.last.t] : [];
+  const sel = mode === 'game' ? game.selected : null;
+  const targets = sel == null ? [] : game.legal.filter(m => m.f === sel).map(m => m.t);
+  $('board').replaceChildren(...squares.map((c, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = (((i >> 3) + (i & 7)) % 2 ? 'd' : 'l') + (hl.includes(i) ? ' hl' : '') + (sel === i ? ' sel' : '') +
+      (targets.includes(i) ? ' target' + (c !== '.' ? ' occ' : '') : '');
+    b.setAttribute('aria-label', sqName(i) + (c === '.' ? ' empty' : ` ${c === c.toUpperCase() ? 'white' : 'black'} ${NAME[c.toLowerCase()]}`));
+    if (c !== '.') b.append(pieceSpan(c));
+    b.addEventListener('click', () => squareClicked(i));
+    return b;
+  }));
+  let svg = '';
+  if (mode === 'game' && game.phase === 'ours' && game.suggestion) svg = arrow(game.suggestion, 'ours');
+  if (mode === 'game' && game.phase === 'reply' && game.predicted) svg = arrow(game.predicted, 'reply');
+  $('arrows').innerHTML = svg;
+}
+function renderPalette() {
+  const pal = $('palette');
+  if (!pal.childElementCount) {
+    for (const c of ['K', 'Q', 'R', 'B', 'N', 'P', '.', 'k', 'q', 'r', 'b', 'n', 'p']) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.p = c;
+      if (c === '.') { b.className = 'erase'; b.textContent = 'Empty'; b.setAttribute('aria-label', 'Empty square'); }
+      else { b.append(pieceSpan(c)); b.setAttribute('aria-label', `${c === c.toUpperCase() ? 'White' : 'Black'} ${NAME[c.toLowerCase()]}`); }
+      b.addEventListener('click', () => { edit.brush = c; renderPalette(); });
+      pal.append(b);
+    }
+  }
+  for (const b of pal.children) b.setAttribute('aria-pressed', String(b.dataset.p === edit.brush));
+}
+function renderSetup() {
+  renderPalette();
+  $('sideW').checked = edit.side === 'w';
+  $('sideB').checked = edit.side === 'b';
+  $('castleW').checked = edit.castleW;
+  $('castleB').checked = edit.castleB;
+  if (document.activeElement !== $('posText')) $('posText').value = buildState();
+}
+function pieceAt(state, i) { return state.split(' ')[0][i]; }
+function describe(state, m) {
+  const c = pieceAt(state, m.f);
+  return c && c !== '.' ? `${NAME[c.toLowerCase()]} ` : '';
+}
+function button(label, fn, cls = 'btn') {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls; b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+function renderGame() {
+  const g = game, pill = $('pill'), say = $('say'), actions = $('actions'), hint = $('hint');
+  actions.replaceChildren();
+  hint.textContent = '';
+  const setPill = (cls, text) => { pill.className = 'pill ' + cls; pill.textContent = text; };
+  $('phaseText').textContent = '';
+  if (g.phase === 'starting') { setPill('', 'Loading'); say.textContent = 'Loading the engine…'; }
+  if (g.phase === 'thinking') {
+    setPill('ours', 'Your move');
+    $('phaseText').textContent = `thinking, up to ${secs()} s`;
+    say.textContent = 'The planner is looking for the fastest win…';
+    actions.append(button('Stop thinking', stopThinking, 'btn secondary'));
+  }
+  if (g.phase === 'ours') {
+    setPill('ours', 'Your move');
+    if (g.suggestion) {
+      const s = g.suggestion;
+      say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span>` +
+        (s.win ? `<br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>` : '');
+      $('phaseText').textContent = `${s.secs.toFixed(1)} s`;
+      actions.append(button('Done, I played it', () => commit(s), 'btn big'));
+      hint.textContent = 'Played something else? Tap that move on the board instead.';
+    } else {
+      say.textContent = 'Enter the move you played on the board.';
+      actions.append(button('Suggest a move', think, 'btn'));
+    }
+  }
+  if (g.phase === 'predicting') { setPill('reply', "Engine's move"); say.textContent = 'Working out the engine\'s reply…'; }
+  if (g.phase === 'reply') {
+    setPill('reply', "Engine's move");
+    if (g.predicted) {
+      say.innerHTML = `The engine should reply with the ${describe(g.state, g.predicted)}<span class="mv">${mvText(g.predicted)}</span>`;
+      actions.append(button('Engine played that', () => commit(g.predicted), 'btn big'));
+      hint.textContent = 'If the game played something else, tap that move on the board.';
+    } else {
+      say.textContent = "Enter Black's move on the board.";
+    }
+  }
+  if (g.phase === 'over') {
+    setPill(g.won ? 'win' : 'loss', g.won ? 'Won' : 'Lost');
+    say.textContent = g.won ? `White wins in ${g.log.filter(e => e.ours).length} moves.` : 'Black wins.';
+  }
+  $('warn').hidden = !g.warn;
+  $('warn').textContent = g.warn || '';
+  $('undo').disabled = !g.undo.length;
+  $('empty').hidden = g.log.length > 0;
+  $('log').replaceChildren(...g.log.map(e => {
+    const tr = document.createElement('tr');
+    const td = (html, cls) => { const c = document.createElement('td'); c.innerHTML = html; if (cls) c.className = cls; tr.append(c); };
+    td(String(e.n), 'n');
+    td(e.ours ? mvText(e.ours) + (e.ours.win ? ` <span class="win">win in ${e.ours.win}</span>` : '') + (e.ours.own ? ' <span class="off">(own)</span>' : '') : '…');
+    td(e.reply ? mvText(e.reply) + (e.reply.off ? ` <span class="off">(expected ${mvText(e.reply.off)})</span>` : '') : '');
+    return tr;
+  }));
+  $('log').lastElementChild?.scrollIntoView({ block: 'nearest' });
+}
+function render() {
+  $('setup').hidden = mode !== 'setup';
+  $('game').hidden = mode !== 'game';
+  if (mode === 'setup') renderSetup(); else renderGame();
+  renderBoard();
+}
+function showError(msg) {
+  if (mode === 'setup') { $('setupError').textContent = msg; $('setupError').hidden = false; }
+  else if (game) { game.warn = msg; render(); }
+}
+
+// ---- game flow ----
+async function startGame() {
+  const sq = edit.sq.join('');
+  const count = c => [...sq].filter(x => x === c).length;
+  if (count('K') !== 1 || count('k') !== 1) return showError('Each side needs exactly one king.');
+  const state = buildState();
+  try {
+    await call('legal', { state });
+  } catch (e) { return showError('That position could not be read: ' + e.message); }
+  game = { state, phase: 'starting', log: [], undo: [], ours: null, last: null, legal: [], selected: null, suggestion: null, predicted: null, warn: null, plannerSecs: null };
+  mode = 'game';
+  render();
+  await advance();
+}
+async function newPlanner() {
+  await call('planner', { seconds: secs() });
+  game.plannerSecs = secs();
+}
+async function advance() {
+  const g = game;
+  g.selected = null; g.suggestion = null; g.predicted = null;
+  let ls;
+  try { ls = await call('legal', { state: g.state }); } catch (e) { if (e.message !== 'stopped') showError(e.message); return; }
+  if (g !== game) return;
+  g.legal = ls ? ls.split(' ').map(x => { const [f, t] = x.split('-').map(Number); return { f, t }; }) : [];
+  const [board, side] = g.state.split(' ');
+  const white = side === 'w';
+  if (!board.includes('K') || (white && !g.legal.length)) return over(false);
+  if (!board.includes('k') || (!white && !g.legal.length)) return over(true);
+  if (white) await think(); else await predict();
+}
+function over(won) { game.phase = 'over'; game.won = won; render(); }
+async function think() {
+  const g = game;
+  g.phase = 'thinking'; g.suggestion = null; render();
+  try {
+    if (g.plannerSecs !== secs()) await newPlanner();
+    const r = await call('choose', { state: g.state });
+    if (g !== game || g.phase !== 'thinking') return;
+    if (r.c) {
+      const [mv, , win] = r.c.split(' ');
+      const [f, t] = mv.split('-').map(Number);
+      g.suggestion = { f, t, win: win ? +win : null, secs: r.secs };
+    }
+  } catch (e) {
+    if (e.message === 'stopped') return;
+    g.warn = e.message;
+  }
+  g.phase = 'ours'; render();
+  if ($('auto').checked && g.suggestion) setTimeout(() => game === g && g.phase === 'ours' && commit(g.suggestion), 400);
+}
+function stopThinking() {
+  startWorker();
+  game.plannerSecs = null; // the planner was lost with the worker
+  game.phase = 'ours'; game.suggestion = null; render();
+}
+async function predict() {
+  const g = game;
+  g.phase = 'predicting'; render();
+  try {
+    const r = await call('engine', { state: g.state });
+    if (g !== game) return;
+    if (r) { const [f, t] = r.split('-').map(Number); g.predicted = { f, t }; }
+  } catch (e) { if (e.message === 'stopped') return; g.warn = e.message; }
+  g.phase = 'reply'; render();
+  if ($('auto').checked && g.predicted) setTimeout(() => game === g && g.phase === 'reply' && commit(g.predicted), 400);
+}
+async function commit(m) {
+  const g = game;
+  if (g.phase !== 'ours' && g.phase !== 'reply') return;
+  const white = g.state.split(' ')[1] === 'w';
+  g.undo.push(JSON.stringify({ state: g.state, ours: g.ours, last: g.last, log: g.log }));
+  g.phase = 'busy';
+  let next;
+  try { next = await call('play', { state: g.state, f: m.f, t: m.t }); }
+  catch (e) { g.undo.pop(); g.phase = white ? 'ours' : 'reply'; showError(e.message); return; }
+  g.warn = null;
+  if (white) {
+    const followed = same(m, g.suggestion);
+    g.ours = { f: m.f, t: m.t };
+    g.log.push({ n: g.log.length + 1, ours: { f: m.f, t: m.t, win: followed ? g.suggestion.win : null, own: !!g.suggestion && !followed }, reply: null });
+  } else {
+    const off = g.predicted && !same(m, g.predicted) ? { ...g.predicted } : null;
+    let e = g.log[g.log.length - 1];
+    if (!e || e.reply) { e = { n: g.log.length + 1, ours: null, reply: null }; g.log.push(e); }
+    e.reply = { f: m.f, t: m.t, off };
+    if (off) g.warn = `The model expected ${mvText(off)}, but you entered ${mvText(m)}. If that is what the game played, the board here probably differs from the game's (a piece, or castling rights). The planner carries on from the position you entered.`;
+    if (g.ours) {
+      try {
+        if (g.plannerSecs === null) await newPlanner();
+        await call('observe', { of: g.ours.f, ot: g.ours.t, rf: m.f, rt: m.t });
+      } catch (e2) { if (e2.message !== 'stopped') g.warn = e2.message; }
+    }
+    g.ours = null;
+  }
+  g.last = { f: m.f, t: m.t };
+  g.state = next;
+  await advance();
+}
+async function undo() {
+  const g = game;
+  if (!g.undo.length) return;
+  if (g.phase === 'thinking' || g.phase === 'predicting') startWorker();
+  Object.assign(g, JSON.parse(g.undo.pop()));
+  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null;
+  render();
+  try { await newPlanner(); } catch (e) { return showError(e.message); } // the old plan may no longer apply
+  await advance();
+}
+function squareClicked(i) {
+  if (mode === 'setup') {
+    const c = edit.brush;
+    if (c === 'K' || c === 'k') edit.sq = edit.sq.map(x => x === c ? '.' : x); // one king per side
+    edit.sq[i] = edit.sq[i] === c ? '.' : c;
+    return editorChanged();
+  }
+  const g = game;
+  if (g.phase !== 'ours' && g.phase !== 'reply') return;
+  if (g.selected != null) {
+    const m = g.legal.find(m => m.f === g.selected && m.t === i);
+    if (m) { g.selected = null; return commit(m); }
+  }
+  g.selected = g.legal.some(m => m.f === i) && g.selected !== i ? i : null;
+  renderBoard();
+}
+
+// ---- controls ----
+$('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); editorChanged(); });
+$('standard').addEventListener('click', () => { edit.sq = [...START]; edit.side = 'w'; edit.castleW = edit.castleB = true; editorChanged(); });
+for (const id of ['sideW', 'sideB']) $(id).addEventListener('change', e => { edit.side = e.target.value; editorChanged(); });
+$('castleW').addEventListener('change', e => { edit.castleW = e.target.checked; editorChanged(); });
+$('castleB').addEventListener('change', e => { edit.castleB = e.target.checked; editorChanged(); });
+$('loadSeed').addEventListener('click', async () => {
+  try { loadIntoEditor(await call('ranked', { seed: +$('seed').value, rank: +$('rank').value })); editorChanged(); }
+  catch (e) { showError(e.message); }
+});
+$('loadText').addEventListener('click', () => {
+  try { loadIntoEditor($('posText').value); $('setupError').hidden = true; $('posText').blur(); render(); }
+  catch (e) { showError(e.message); }
+});
+$('copyText').addEventListener('click', () => {
+  const inp = $('posText');
+  navigator.clipboard.writeText(inp.value).catch(() => { inp.focus(); inp.select(); });
+});
+$('start').addEventListener('click', startGame);
+$('undo').addEventListener('click', undo);
+$('edit').addEventListener('click', () => {
+  if (game.phase === 'thinking' || game.phase === 'predicting') startWorker();
+  loadIntoEditor(game.state);
+  edit.full = null;
+  mode = 'setup'; game = null;
+  render();
+});
+const syncSecs = src => { $('secs').value = $('secs2').value = src.value; };
+$('secs').addEventListener('change', e => syncSecs(e.target));
+$('secs2').addEventListener('change', e => syncSecs(e.target));
+$('auto').addEventListener('change', e => {
+  if (!e.target.checked || mode !== 'game') return;
+  if (game.phase === 'ours' && game.suggestion) commit(game.suggestion);
+  if (game.phase === 'reply' && game.predicted) commit(game.predicted);
+});
+
+startWorker();
+render();
+call('ranked', { seed: 5000, rank: 0 }).then(s => { if (mode === 'setup' && edit.sq.join('') === START) { loadIntoEditor(s); render(); } }).catch(e => showError(e.message));
 </script>
 </body>
 </html>

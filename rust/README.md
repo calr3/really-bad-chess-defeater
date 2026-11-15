@@ -58,7 +58,7 @@ cargo build --release --target wasm32-unknown-unknown --features wasm --lib
 wasm-bindgen --target web --out-dir web/pkg target/wasm32-unknown-unknown/release/rbc.wasm
 wasm-bindgen --target nodejs --out-dir pkg-node target/wasm32-unknown-unknown/release/rbc.wasm
 node js/test.cjs pkg-node                          # wasm checks against the vectors
-cd web && python3 -m http.server                   # demo: open http://localhost:8000
+cd web && python3 -m http.server                   # web UI: open http://localhost:8000
 ```
 
 API (all positions are state strings, moves are `"from-to"`):
@@ -74,6 +74,10 @@ const p = new rbc.Planner(30);          // 30 s per move; keep one per game
 p.choose(s);                            // "53-45 win 6": our move, and a forced win if found
 p.observe(53, 45, 12, 28);              // after each pair of moves: ours, then the reply
 ```
+
+The web UI (`web/`) is for playing along with a real game: set up the board the game shows (or
+load a ranked board by seed), and it suggests each White move, predicts the engine's reply, and
+lets you enter what the game actually played by tapping squares. It can also auto-play both sides.
 
 The wasm build is single-threaded and blocks while it thinks, so in a browser run it in a Web
 Worker, as `web/worker.js` does. `Planner.setMaxNodes(n)` also caps the search by positions
