@@ -88,35 +88,67 @@ The board is regenerated until the material difference, converted with
 material; higher ranks give Black more. The player is always White; the AI always plays Black.
 See `notes-game-layer.md` for details: modes, seeds, rank progression.
 
-## The exploit engine (`exploit/Exploiter.cs`)
+## Beating it
 
 A minimax engine assumes the opponent finds the best reply. `cgEngine` is deterministic: given
-a position it always plays the same move. So the exploiter **runs the decompiled `cgEngine`
-itself** at every opponent turn in its search (opponent-model search). It only branches over
-its own moves:
+a position it always plays the same move. So both engines here **run `cgEngine` itself** at
+every opponent turn in their search, instead of guessing what it might do (opponent-model
+search).
 
-1. Each legal root move is played, the model's actual reply is computed, and the result is
-   scored by a conventional alpha-beta search with quiescence. That search is pessimistic,
-   because it assumes best defence beyond the modelled ply.
-2. The best few candidates are searched one more of our moves deep against the model.
-   Candidates at that level are pre-ordered by the same conventional search.
-3. Positions where the opponent has no legal move score as wins: in Really Bad Chess both mate
-   and stalemate lose. Faster wins score higher.
+### Fast model (`exploit/FastModel.cs`)
 
-Model replies are cached per position and root moves are searched in parallel. The leaf
-evaluation is ordinary material plus a mating-technique term (drive the enemy king to the
-edge, bring ours closer), so once the model's mistakes have won material the engine converts
-quickly.
+`FastBoard` re-implements `cgBoard` and `cgEngine` line by line without the allocations. Moves
+are structs in pooled arrays, the mutable per-move state is kept in an undo stack, move sets are
+flat arrays, the evaluation is incremental, and the AI's position cache is an open-addressing
+hash map. It keeps every quirk, including the exact move-generation order and the same unstable
+sorts, so it must pick exactly the same move. `harness check N` compares the two on N random
+reachable positions, including their strictly legal move lists. It is about 3× faster (≈160 ms
+per AI move at depths 3/5/5).
+
+### Planner (`exploit/Planner.cs`), the current engine
+
+Because the opponent's reply is fixed, a line "our move, its reply, our move, …" is determined
+entirely by our moves. The search tree only branches on our side, and a win is simply a line
+after which the opponent has no legal move. In Really Bad Chess both mate and stalemate lose.
+
+* **Best-first search.** Each queue entry is a position and one of our candidate moves. Its
+  priority is a cheap estimate: quiescence search, the opponent's legal-move count, minus a
+  penalty per move of depth. Calling the model, the expensive step, happens only when an entry
+  reaches the front.
+* **Shortest win.** Once a win in N is known, only shorter lines are explored, and the depth
+  penalty rises (`DepthPenaltyAfterWin`) to make the search broader.
+* **Plans carry over.** The best win is kept as a plan across turns. Since the model is exact,
+  the plan stays valid while the opponent replies as predicted, and later turns only look for
+  something shorter.
+* **Fallback.** Without a known win, it plays towards the best position in the explored tree.
+  Every such position is genuinely reachable, because the replies along the way are the real
+  ones.
+* **Parameters.** `SecondsPerMove` (default 300) is the time budget for each move. It also
+  takes the number of threads, the opponent's depths and the penalty weights. A search stops
+  early when no shorter win can exist.
+
+The leaf evaluation is material plus a mating term when ahead: squares around the enemy king
+that are attacked or blocked, the enemy king pushed to the edge, our king brought closer.
+
+### First version (`exploit/Exploiter.cs`)
+
+Two of our moves deep against the faithful model, scored by a conventional pessimistic
+alpha-beta search. It is kept for comparison; see the results below.
 
 ## Running
 
 ```sh
+# planner: ranks, games per rank, first seed, seconds per move [, threads]
+dotnet run -c Release --project harness -- plan 0,30,60 2 1000 120
+# check the fast model against the faithful port on 100 random positions
+dotnet run -c Release --project harness -- check 100
+# first version: ranks, games per rank, first seed
 dotnet run -c Release --project harness -- 0,30,60 2 1000
-#   ranks to test, games per rank, first seed (append any 4th argument to print every game)
 ```
 
-`harness/Program.cs` generates ranked boards with the game's own generator, gives the
-exploiter White and `cgEngine` (depths 3/5/5) Black, and plays to a result.
+The harness generates ranked boards with the game's own generator. Our engine plays White and
+the faithful `cgEngine` (depths 3/5/5) plays Black. The game is played to a result, and every
+AI reply is checked against the planner's prediction.
 
 ## Results
 
