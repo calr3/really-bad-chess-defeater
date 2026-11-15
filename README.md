@@ -152,29 +152,39 @@ AI reply is checked against the planner's prediction.
 
 ## Results
 
-Run with `dotnet run -c Release --project harness -- 0,10,20,30,40,50,60,70,80,90,100 3 5000`: 33
-ranked boards from the game's own generator, three seeds per rank. Rank 0 gives White the
-stronger army; rank 100 gives Black about 30 points more material, for example several extra
-queens. The exploiter played White and `cgEngine` played Black at the shipped depths 3/5/5.
+Both engines were run on the same 33 ranked boards from the game's own generator, three seeds
+per rank (`... 0,10,20,30,40,50,60,70,80,90,100 3 5000`). Rank 0 gives White the stronger army;
+rank 100 gives Black about 30 points more material, for example several extra queens. Our engine
+played White and the faithful `cgEngine` played Black at the shipped depths 3/5/5.
 
-| rank | games | won | moves to win |
-|---:|---:|---:|---|
-| 0 | 3 | 3 | 9, 10, 7 |
-| 10 | 3 | 3 | 8, 19, 6 |
-| 20 | 3 | 3 | 4, 5, 10 |
-| 30 | 3 | 3 | 9, 15, 7 |
-| 40 | 3 | 3 | 11, 11, 11 |
-| 50 | 3 | 3 | 9, 8, 10 |
-| 60 | 3 | 3 | 8, 14, 12 |
-| 70 | 3 | 3 | 10, 20, 15 |
-| 80 | 3 | 3 | 17, 10, 14 |
-| 90 | 3 | 3 | 19, 13, 32 |
-| 100 | 3 | 3 | 14, 30, 19 |
-| **all** | **33** | **33** | **mean 12.1, max 32** |
+- **Exploiter** (first version): `dotnet run -c Release --project harness -- <ranks> 3 5000`
+- **Planner** (fast model + best-first win search) at 120 s/move:
+  `dotnet run -c Release --project harness -- plan <ranks> 3 5000 120`
 
-Each game took 0.5–7 minutes on 4 cores, almost all of it spent running the model. The win
-condition used is the game's: the side to move with no legal move loses, whether mated or
-stalemated.
+| rank | Exploiter: moves to win | Planner: moves to win |
+|---:|---|---|
+| 0 | 9, 10, 7 | 4, 7, 4 |
+| 10 | 8, 19, 6 | 5, 4, 3 |
+| 20 | 4, 5, 10 | 3, 5, 4 |
+| 30 | 9, 15, 7 | 5, 5, 5 |
+| 40 | 11, 11, 11 | 5, 5, 5 |
+| 50 | 9, 8, 10 | 7, 3, 5 |
+| 60 | 8, 14, 12 | 6, 11, 6 |
+| 70 | 10, 20, 15 | 6, 9, 4 |
+| 80 | 17, 10, 14 | 11, 9, 7 |
+| 90 | 19, 13, 32 | 12, 4, 12 |
+| 100 | 14, 30, 19 | 10, 11, 8 |
+| **all** | **33/33 won, mean 12.1, max 32** | **33/33 won, mean 6.4, max 12** |
+
+The planner won every game and was never slower than the Exploiter on any board. Its predicted
+reply matched the real engine's move every time (0 mispredictions in 210 moves). The Exploiter
+took 0.5–7 minutes per game on 4 cores. The planner took 24 s – 19 min per game, 236 min for all
+33, because it uses up to its full time budget on most moves. The default budget is 300 s/move
+(`Planner.SecondsPerMove`, or the last harness argument). The benchmark used 120 s to keep the
+run under four hours.
+
+The win condition used is the game's: the side to move with no legal move loses, whether mated
+or stalemated.
 
 Caveat: the port was checked by reading the disassembly and by standard perft counts (20 / 400
 / 8902 from the initial position). It was not checked move-for-move against the running game,
