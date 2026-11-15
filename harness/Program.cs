@@ -43,7 +43,9 @@ static class Program
 
     static void Main(string[] args)
     {
-        // usage: harness <rank,rank,...> <games per rank> [firstSeed]
+        // usage: harness <rank,rank,...> <games per rank> [firstSeed]   |   harness check <positions> [seed]
+        if (args.Length > 0 && args[0] == "plan") { PlanGames.Run(args); return; }
+        if (args.Length > 0 && args[0] == "check") { new cgBoard(null); ModelCheck.Run(int.Parse(args[1]), args.Length > 2 ? int.Parse(args[2]) : 1); return; }
         var ranks = (args.Length > 0 ? args[0] : "15").Split(',');
         int games = args.Length > 1 ? int.Parse(args[1]) : 1;
         int seed0 = args.Length > 2 ? int.Parse(args[2]) : 1000;
