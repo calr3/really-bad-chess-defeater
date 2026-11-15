@@ -1,5 +1,7 @@
 baseapk.apk
 *.apk
 build/
-bin/
+/src/bin/
+/exploit/bin/
+/harness/bin/
 obj/

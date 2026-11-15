@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RBC planner (wasm)</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --light: #eee; --dark: #b8b8b8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #e8e8e8; --muted: #999; --light: #3a3a3a; --dark: #262626; } }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 640px; margin: 0 auto; }
+  #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: min(100%, 360px); aspect-ratio: 1; margin: 12px 0; }
+  #board div { display: flex; align-items: center; justify-content: center; font-size: min(7vw, 30px); }
+  label { margin-right: 12px; }
+  input { width: 5em; }
+  #log { color: var(--muted); font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Really Bad Chess planner</h1>
+  <p>The planner (White) plays the game's engine (Black) on a ranked board, all in WebAssembly in a worker.</p>
+  <form id="f">
+    <label>Seed <input id="seed" type="number" value="5000"></label>
+    <label>Rank <input id="rank" type="number" value="0" min="0" max="120"></label>
+    <label>Seconds/move <input id="secs" type="number" value="10" min="1"></label>
+    <button>Play</button>
+  </form>
+  <div id="board"></div>
+  <div id="result"></div>
+  <div id="log"></div>
+</main>
+<script type="module">
+const glyph = { k: '♚', q: '♛', b: '♝', n: '♞', r: '♜', p: '♟', K: '♔', Q: '♕', B: '♗', N: '♘', R: '♖', P: '♙', '.': '' };
+const board = document.getElementById('board'), log = document.getElementById('log'), result = document.getElementById('result');
+function show(state) {
+  board.innerHTML = '';
+  [...state.split(' ')[0]].forEach((c, i) => {
+    const d = document.createElement('div');
+    d.style.background = ((i >> 3) + (i & 7)) % 2 ? 'var(--dark)' : 'var(--light)';
+    d.textContent = glyph[c];
+    board.append(d);
+  });
+}
+let worker;
+document.getElementById('f').onsubmit = e => {
+  e.preventDefault();
+  worker?.terminate();
+  worker = new Worker('./worker.js', { type: 'module' });
+  log.textContent = ''; result.textContent = 'thinking…';
+  worker.onmessage = ({ data: m }) => {
+    if (m.type === 'state') { show(m.state); if (m.text !== 'start') log.textContent += m.text + '\n'; }
+    if (m.type === 'end') result.textContent = m.result;
+  };
+  const q = new URLSearchParams(location.search);
+  worker.postMessage({ type: 'new', seed: +seed.value, rank: +rank.value, seconds: +secs.value, maxNodes: +(q.get('maxNodes') || 0) });
+};
+show('rbqnkbnrpppppppp................................PPPPPPPPRNBQKBNR');
+</script>
+</body>
+</html>

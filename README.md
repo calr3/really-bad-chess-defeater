@@ -144,11 +144,23 @@ dotnet run -c Release --project harness -- plan 0,30,60 2 1000 120
 dotnet run -c Release --project harness -- check 100
 # first version: ranks, games per rank, first seed
 dotnet run -c Release --project harness -- 0,30,60 2 1000
+# reference outputs for ports (rust/tests/data), and engine timing on them
+dotnet run -c Release --project harness -- vectors rust/tests/data 1500 1
+dotnet run -c Release --project harness -- bench rust/tests/data/pos.txt 300
 ```
 
 The harness generates ranked boards with the game's own generator. Our engine plays White and
 the faithful `cgEngine` (depths 3/5/5) plays Black. The game is played to a result, and every
 AI reply is checked against the planner's prediction.
+
+## Rust / WebAssembly port (`rust/`)
+
+`rust/` holds a Rust port of the fast model, the army generator and the planner. It builds
+natively and to WebAssembly (134 KB), and includes a browser demo. It is checked against
+reference outputs from the C# model, written by `harness vectors`: on 1,500 positions it
+produces the same legal moves and the same engine root list, with every value and the order
+after the game's sorts. It also matches the generator on 864 boards and .NET's sort on 3,009
+arrays. See `rust/README.md`.
 
 ## Results
 

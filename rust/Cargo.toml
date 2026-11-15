@@ -1,0 +1,27 @@
+[package]
+name = "rbc"
+version = "0.1.0"
+edition = "2021"
+description = "Really Bad Chess engine model and planner (port of the C# in ../src and ../exploit)"
+license-file = "../LICENSE"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# wasm-bindgen API for browsers / Node (see src/wasm.rs)
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.test]
+opt-level = 3
