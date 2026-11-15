@@ -73,6 +73,8 @@ s = rbc.play(s, 52, 36);                // apply a legal move
 const p = new rbc.Planner(30);          // 30 s per move; keep one per game
 p.choose(s);                            // "53-45 win 6": our move, and a forced win if found
 p.observe(53, 45, 12, 28);              // after each pair of moves: ours, then the reply
+p.planLine();                           // the win being followed, "f-t f-t ..." (ours, reply, ...)
+p.setPlanLine(line);                    // restore it, e.g. into a new Planner
 ```
 
 The web UI (`web/`) is for playing along with a real game: set up the board the game shows (or

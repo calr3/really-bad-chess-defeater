@@ -210,6 +210,17 @@ impl Planner {
         }
     }
 
+    /// The plan being followed, as (our move, expected reply) pairs; the last reply is unused.
+    pub fn plan(&self) -> Option<&[(FMove, FMove)]> {
+        self.plan.as_deref()
+    }
+
+    /// Replace the plan, e.g. with one saved from another Planner. choose() uses it only if its
+    /// first move is legal in the position it is given.
+    pub fn set_plan(&mut self, plan: Option<Vec<(FMove, FMove)>>) {
+        self.plan = plan.filter(|p| !p.is_empty());
+    }
+
     /// Choose our move. `pos` must be our turn and carry the last move (for en passant).
     pub fn choose(&mut self, pos: &FastBoard) -> Option<Choice> {
         let t0 = now_secs();

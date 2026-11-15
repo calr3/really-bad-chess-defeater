@@ -20,6 +20,8 @@ const ops = {
     return { c, secs: (performance.now() - t0) / 1000, info: planner.lastInfo() };
   },
   observe: ({ of, ot, rf, rt }) => planner.observe(of, ot, rf, rt),
+  planLine: () => (planner ? planner.planLine() : ''),
+  setPlanLine: ({ line }) => planner.setPlanLine(line),
   // The moves (none, one or two) that lead from `state` to a position whose squares are `target`.
   match: ({ state, target }) => {
     const squares = s => s.split(' ')[0];

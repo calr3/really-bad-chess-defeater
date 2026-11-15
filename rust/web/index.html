@@ -404,17 +404,25 @@ function renderGame() {
   if (g.phase === 'starting') { setPill('', 'Loading'); say.textContent = 'Loading the engine…'; }
   if (g.phase === 'thinking') {
     setPill('ours', 'Your move');
-    $('phaseText').textContent = `thinking, up to ${secs()} s`;
-    say.textContent = 'The planner is looking for the fastest win…';
-    actions.append(button('Stop thinking', stopThinking, 'btn secondary'));
+    if (g.suggestion) {
+      const s = g.suggestion;
+      say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span><br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>`;
+      $('phaseText').textContent = `looking for a faster win, up to ${secs()} s`;
+      actions.append(button('Play it now', () => { stopThinking(); commit(game.suggestion); }, 'btn big'));
+      hint.textContent = 'This is the next move of the win already found. The planner is checking for a faster one, and suggests this move again if it finds none. You can play it without waiting.';
+    } else {
+      $('phaseText').textContent = `thinking, up to ${secs()} s`;
+      say.textContent = 'The planner is looking for the fastest win…';
+      actions.append(button('Stop thinking', stopThinking, 'btn secondary'));
+    }
   }
   if (g.phase === 'ours') {
     setPill('ours', 'Your move');
     if (g.suggestion) {
       const s = g.suggestion;
       say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span>` +
-        (s.win ? `<br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>` : '');
-      $('phaseText').textContent = `${s.secs.toFixed(1)} s`;
+        (s.win ? `<br><span class="win">${s.faster ? 'Found a faster win: ' : 'Forced win in '}${s.win} move${s.win > 1 ? 's' : ''}</span>` : '');
+      $('phaseText').textContent = s.secs == null ? 'from the win found earlier' : `${s.secs.toFixed(1)} s`;
       actions.append(button('Done, I played it', () => commit(s), 'btn big'));
       hint.textContent = 'Played something else? Tap that move on the board instead.';
     } else {
@@ -481,8 +489,9 @@ async function startGame() {
   render();
   await advance();
 }
-async function newPlanner() {
+async function newPlanner(line = '') {
   await call('planner', { seconds: secs() });
+  if (line) await call('setPlanLine', { line });
   game.plannerSecs = secs();
 }
 async function advance() {
@@ -501,15 +510,27 @@ async function advance() {
 function over(won) { game.phase = 'over'; game.won = won; render(); }
 async function think() {
   const g = game;
-  g.phase = 'thinking'; g.suggestion = null; render();
+  g.phase = 'thinking'; g.suggestion = null; g.planLine = ''; render();
   try {
-    if (g.plannerSecs !== secs()) await newPlanner();
+    // A win found earlier is still on if the engine replied as expected: offer its next move at once.
+    if (g.plannerSecs !== null) g.planLine = await call('planLine');
+    if (g.plannerSecs !== secs()) await newPlanner(g.planLine);
+    if (g !== game || g.phase !== 'thinking') return;
+    const first = g.planLine.split(' ')[0];
+    if (first) {
+      const [f, t] = first.split('-').map(Number);
+      if (g.legal.some(m => m.f === f && m.t === t)) {
+        g.suggestion = { f, t, win: g.planLine.split(' ').length / 2, secs: null, planned: true };
+        render();
+      }
+    }
     const r = await call('choose', { state: g.state });
     if (g !== game || g.phase !== 'thinking') return;
     if (r.c) {
       const [mv, , win] = r.c.split(' ');
       const [f, t] = mv.split('-').map(Number);
-      g.suggestion = { f, t, win: win ? +win : null, secs: r.secs };
+      const before = g.suggestion?.planned ? g.suggestion.win : null;
+      g.suggestion = { f, t, win: win ? +win : null, secs: r.secs, faster: before !== null && win && +win < before };
     }
   } catch (e) {
     if (e.message === 'stopped') return;
@@ -519,9 +540,15 @@ async function think() {
   if ($('auto').checked && g.suggestion) setTimeout(() => game === g && g.phase === 'ours' && commit(g.suggestion), 400);
 }
 function stopThinking() {
-  startWorker();
-  game.plannerSecs = null; // the planner was lost with the worker
-  game.phase = 'ours'; game.suggestion = null; render();
+  const g = game, keep = g.suggestion?.planned ? g.suggestion : null;
+  startWorker(); // the planner goes with the old worker; start a new one that keeps the plan
+  g.plannerSecs = null;
+  if (worker) {
+    call('planner', { seconds: secs() }).catch(e => showError(e.message));
+    if (g.planLine) call('setPlanLine', { line: g.planLine }).catch(e => showError(e.message));
+    g.plannerSecs = secs(); // the worker runs these before anything sent later
+  }
+  g.phase = 'ours'; g.suggestion = keep; render();
 }
 async function predict() {
   const g = game;

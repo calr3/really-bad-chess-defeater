@@ -107,6 +107,32 @@ impl WasmPlanner {
         self.0.observe(FMove::new(our_from, our_to, 0), FMove::new(reply_from, reply_to, 0));
     }
 
+    /// The current plan as "f-t f-t ...": our move, the expected reply, our next move, and so on.
+    /// Empty if there is none. Its first move is what choose() plays unless it finds a faster win.
+    #[wasm_bindgen(js_name = planLine)]
+    pub fn plan_line(&self) -> String {
+        self.0
+            .plan()
+            .map(|p| p.iter().flat_map(|(a, b)| [format!("{}-{}", a.from, a.to), format!("{}-{}", b.from, b.to)]).collect::<Vec<_>>().join(" "))
+            .unwrap_or_default()
+    }
+
+    /// Restore a plan saved with planLine(), e.g. into a new Planner.
+    #[wasm_bindgen(js_name = setPlanLine)]
+    pub fn set_plan_line(&mut self, line: &str) -> Result<(), JsError> {
+        use crate::board::FMove;
+        let mut moves = Vec::new();
+        for m in line.split_whitespace() {
+            let (f, t) = m.split_once('-').ok_or_else(|| JsError::new("bad move"))?;
+            moves.push(FMove::new(f.parse().map_err(|_| JsError::new("bad move"))?, t.parse().map_err(|_| JsError::new("bad move"))?, 0));
+        }
+        if moves.len() % 2 != 0 {
+            return Err(JsError::new("a plan line has an even number of moves"));
+        }
+        self.0.set_plan(Some(moves.chunks(2).map(|c| (c[0], c[1])).collect()));
+        Ok(())
+    }
+
     /// Statistics of the last choose().
     #[wasm_bindgen(js_name = lastInfo)]
     pub fn last_info(&self) -> String {
