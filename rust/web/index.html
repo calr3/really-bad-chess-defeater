@@ -251,11 +251,28 @@ const secs = () => Math.min(600, Math.max(1, +$('secs').value || 20));
 // ---- worker calls ----
 let worker = null, seq = 0;
 const pending = new Map();
+function makeWorker() {
+  const url = new URL('./worker.js', import.meta.url).href;
+  try {
+    return new Worker(url, { type: 'module' });
+  } catch (e) {
+    // The page's files can be served from another origin than the page, and a worker script must
+    // come from the page's own origin. A worker made from a blob is, and it can import the file.
+    const blob = new Blob([`import ${JSON.stringify(url)};`], { type: 'text/javascript' });
+    return new Worker(URL.createObjectURL(blob), { type: 'module' });
+  }
+}
 function startWorker() {
   worker?.terminate();
   for (const p of pending.values()) p.reject(new Error('stopped'));
   pending.clear();
-  worker = new Worker('./worker.js', { type: 'module' });
+  try {
+    worker = makeWorker();
+  } catch (e) {
+    worker = null;
+    showError('The engine could not start in this browser: ' + e.message);
+    return;
+  }
   worker.onmessage = ({ data }) => {
     const p = pending.get(data.id);
     if (!p) return;
@@ -264,10 +281,15 @@ function startWorker() {
   };
   worker.onerror = e => showError('The engine could not start: ' + (e.message || 'unknown error'));
 }
-const call = (op, args) => new Promise((resolve, reject) => {
+// timeout (ms) is for quick calls only: the planner's own calls take as long as it thinks.
+const call = (op, args, timeout = 0) => new Promise((resolve, reject) => {
+  if (!worker) return reject(new Error('The engine is not running. Reload the page to try again.'));
   const id = ++seq;
   pending.set(id, { resolve, reject });
   worker.postMessage({ id, op, args });
+  if (timeout) setTimeout(() => {
+    if (pending.delete(id)) reject(new Error('The engine did not respond. Reload the page to try again.'));
+  }, timeout);
 });
 
 // ---- state ----
@@ -447,8 +469,13 @@ async function startGame() {
   if (count('K') !== 1 || count('k') !== 1) return showError('Each side needs exactly one king.');
   const state = buildState();
   try {
-    await call('legal', { state });
-  } catch (e) { return showError('That position could not be read: ' + e.message); }
+    $('start').disabled = true;
+    await call('legal', { state }, 30000);
+  } catch (e) {
+    return showError(/engine/.test(e.message) ? e.message : 'That position could not be read: ' + e.message);
+  } finally {
+    $('start').disabled = false;
+  }
   game = { state, phase: 'starting', log: [], undo: [], ours: null, last: null, legal: [], selected: null, suggestion: null, predicted: null, warn: null, plannerSecs: null };
   mode = 'game';
   render();
@@ -656,9 +683,10 @@ $('auto').addEventListener('change', e => {
   if (game.phase === 'reply' && game.predicted) commit(game.predicted);
 });
 
-startWorker();
+window.addEventListener('unhandledrejection', e => showError(String(e.reason?.message ?? e.reason)));
 render();
-call('ranked', { seed: 5000, rank: 0 }).then(s => { if (mode === 'setup' && edit.sq.join('') === START) { loadIntoEditor(s); render(); } }).catch(e => showError(e.message));
+startWorker();
+call('ranked', { seed: 5000, rank: 0 }, 30000).then(s => { if (mode === 'setup' && edit.sq.join('') === START) { loadIntoEditor(s); render(); } }).catch(e => showError(e.message));
 </script>
 </body>
 </html>
