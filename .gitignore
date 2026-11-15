@@ -1,0 +1,5 @@
+baseapk.apk
+*.apk
+build/
+bin/
+obj/
