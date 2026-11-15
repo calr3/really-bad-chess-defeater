@@ -108,6 +108,11 @@
   details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   details > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
   details > div { padding: 0 12px 12px; display: grid; gap: 10px; }
+  .shot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  label.btn { display: inline-block; font: 600 14px var(--body); padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: var(--accent); color: var(--accent-fg); }
+  label.btn.big { font-size: 16px; padding: 10px 20px; }
+  label.btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+  #board .doubt { outline: 3px dashed var(--bad); outline-offset: -5px; }
   .error { color: var(--bad); font-weight: 500; margin: 0; }
 
   .prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
@@ -152,7 +157,13 @@
     <div class="side">
       <div id="setup" class="panel">
         <h2>Set up the board</h2>
-        <p class="muted">Pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
+        <div class="shot">
+          <label class="btn big" for="shotSetup">Read a screenshot</label>
+          <input type="file" id="shotSetup" accept="image/*" hidden>
+          <span class="note">or paste one. Use a full, uncropped screenshot of the game.</span>
+        </div>
+        <p id="shotNote" class="note" hidden></p>
+        <p class="muted">To fix or set up the board by hand, pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
         <div id="palette" role="toolbar" aria-label="Pieces"></div>
         <div class="row">
           <button class="btn secondary" id="clear" type="button">Empty board</button>
@@ -207,6 +218,8 @@
         <div class="row">
           <button class="btn secondary" id="undo" type="button">Undo</button>
           <button class="btn secondary" id="edit" type="button">Edit board</button>
+          <label class="btn secondary" for="shotGame">Read a screenshot</label>
+          <input type="file" id="shotGame" accept="image/*" hidden>
           <div class="field"><label class="label" for="secs2">Seconds per move</label><input id="secs2" type="number" value="20" min="1" max="600"></div>
           <label class="choice" style="align-self:end"><input type="checkbox" id="auto"> Auto-play both sides</label>
         </div>
@@ -217,6 +230,7 @@
           </table>
           <div id="empty" class="empty">No moves yet.</div>
         </div>
+        <p class="note">After the engine replies in the game, you can read a screenshot (or paste one) instead of tapping the moves in. The page works out your move and the engine's reply from it.</p>
         <p class="note">The planner models the game's engine exactly, so its prediction of each reply should match what the game plays. If a reply differs, check the board: a misplaced piece or wrong castling rights changes the engine's choice.</p>
       </div>
     </div>
@@ -224,6 +238,7 @@
 </main>
 
 <script type="module">
+import { readBoard } from './vision.js';
 const START = 'rnbqkbnrpppppppp................................PPPPPPPPRNBQKBNR';
 const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const NAME = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
@@ -257,7 +272,7 @@ const call = (op, args) => new Promise((resolve, reject) => {
 
 // ---- state ----
 let mode = 'setup';
-const edit = { sq: [...START], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null };
+const edit = { sq: [...START], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null, last: null, doubt: [] };
 let game = null;
 
 function buildState() {
@@ -266,7 +281,8 @@ function buildState() {
   const n = edit.sq.filter(c => c !== '.').length;
   const wk = edit.castleW && sq[60] === 'K' ? 0 : 1;
   const bk = edit.castleB && sq[4] === 'k' ? 0 : 1;
-  return `${sq} ${edit.side} 0 0 0 0 0 0 ${wk} ${bk} ${n} 255 255`;
+  const last = edit.last && edit.side === 'w' ? `${edit.last.f} ${edit.last.t}` : '255 255';
+  return `${sq} ${edit.side} 0 0 0 0 0 0 ${wk} ${bk} ${n} ${last}`;
 }
 function loadIntoEditor(text) {
   const parts = text.trim().split(/\s+/);
@@ -275,7 +291,7 @@ function loadIntoEditor(text) {
   if (p.length !== 64 || /[^kqbnrpKQBNRP.]/.test(p)) throw new Error('That position has the wrong number of squares or an unknown piece letter.');
   edit.sq = [...p];
   edit.side = parts[1] === 'b' ? 'b' : 'w';
-  edit.full = null;
+  edit.full = null; edit.last = null; edit.doubt = []; $('shotNote').hidden = true;
   if (parts.length === 13) {
     edit.castleW = parts[2] === '0' && parts[8] === '0';
     edit.castleB = parts[3] === '0' && parts[9] === '0';
@@ -313,7 +329,7 @@ function renderBoard() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = (((i >> 3) + (i & 7)) % 2 ? 'd' : 'l') + (hl.includes(i) ? ' hl' : '') + (sel === i ? ' sel' : '') +
-      (targets.includes(i) ? ' target' + (c !== '.' ? ' occ' : '') : '');
+      (targets.includes(i) ? ' target' + (c !== '.' ? ' occ' : '') : '') + (mode === 'setup' && edit.doubt.includes(i) ? ' doubt' : '');
     b.setAttribute('aria-label', sqName(i) + (c === '.' ? ' empty' : ` ${c === c.toUpperCase() ? 'white' : 'black'} ${NAME[c.toLowerCase()]}`));
     if (c !== '.') b.append(pieceSpan(c));
     b.addEventListener('click', () => squareClicked(i));
@@ -538,6 +554,7 @@ function squareClicked(i) {
     const c = edit.brush;
     if (c === 'K' || c === 'k') edit.sq = edit.sq.map(x => x === c ? '.' : x); // one king per side
     edit.sq[i] = edit.sq[i] === c ? '.' : c;
+    edit.doubt = edit.doubt.filter(d => d !== i);
     return editorChanged();
   }
   const g = game;
@@ -551,8 +568,61 @@ function squareClicked(i) {
 }
 
 // ---- controls ----
-$('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); editorChanged(); });
-$('standard').addEventListener('click', () => { edit.sq = [...START]; edit.side = 'w'; edit.castleW = edit.castleB = true; editorChanged(); });
+$('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); edit.last = null; edit.doubt = []; editorChanged(); });
+$('standard').addEventListener('click', () => { edit.sq = [...START]; edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged(); });
+
+// ---- screenshots ----
+async function readShot(file) {
+  const bmp = await createImageBitmap(file);
+  const cv = document.createElement('canvas');
+  cv.width = bmp.width; cv.height = bmp.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const r = readBoard(ctx.getImageData(0, 0, cv.width, cv.height));
+  if (!r) throw new Error("Couldn't find the board in that image. Use a full, uncropped screenshot of the game screen.");
+  const kings = [...r.squares].filter(c => c === 'K').length + [...r.squares].filter(c => c === 'k').length;
+  if (kings < 2) throw new Error("Couldn't find both kings in that image. Is it a screenshot of a game in progress?");
+  return r;
+}
+async function shotToEditor(file) {
+  let r;
+  try { r = await readShot(file); } catch (e) { return showError(e.message); }
+  loadIntoEditor(r.squares);
+  edit.side = 'w';
+  edit.last = r.last;
+  edit.doubt = r.cells.map((c, i) => c.piece !== '.' && (c.margin < 0.04 || c.score < 0.7) ? i : -1).filter(i => i >= 0);
+  const pieces = [...r.squares].filter(c => c !== '.').length;
+  $('shotNote').textContent = `Read ${pieces} pieces` + (r.last ? `, and the engine's last move, ${mvText(r.last)}` : '') + '. ' +
+    (edit.doubt.length ? `Check the ${edit.doubt.length} square${edit.doubt.length > 1 ? 's' : ''} outlined in red, then press Start.` : 'Check the board, then press Start.');
+  $('shotNote').hidden = false;
+  $('setupError').hidden = true;
+  render();
+}
+async function shotToGame(file) {
+  const g = game;
+  if (g.phase !== 'ours' && g.phase !== 'reply') return showError('Wait for the planner to finish thinking, then read the screenshot.');
+  let r, path;
+  try {
+    r = await readShot(file);
+    path = await call('match', { state: g.state, target: r.squares });
+  } catch (e) { return showError(e.message); }
+  if (game !== g) return;
+  if (path === null) return showError("That screenshot isn't one or two moves on from the position here. If the board has drifted, press Edit board and read the screenshot there.");
+  if (!path.length) { g.warn = 'That screenshot shows the position already on the board here, so there is nothing new to enter.'; return render(); }
+  for (let k = 0; k < path.length; k++) {
+    const done = commit(path[k]);
+    if (k < path.length - 1) await done;
+  }
+}
+for (const [id, fn] of [['shotSetup', shotToEditor], ['shotGame', shotToGame]]) {
+  $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) fn(f); });
+}
+document.addEventListener('paste', e => {
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+  if (!f) return;
+  e.preventDefault();
+  if (mode === 'setup') shotToEditor(f); else shotToGame(f);
+});
 for (const id of ['sideW', 'sideB']) $(id).addEventListener('change', e => { edit.side = e.target.value; editorChanged(); });
 $('castleW').addEventListener('change', e => { edit.castleW = e.target.checked; editorChanged(); });
 $('castleB').addEventListener('change', e => { edit.castleB = e.target.checked; editorChanged(); });

@@ -78,6 +78,9 @@ p.observe(53, 45, 12, 28);              // after each pair of moves: ours, then 
 The web UI (`web/`) is for playing along with a real game: set up the board the game shows (or
 load a ranked board by seed), and it suggests each White move, predicts the engine's reply, and
 lets you enter what the game actually played by tapping squares. It can also auto-play both sides.
+It can read the board from a screenshot of the game (`web/vision.js`: piece silhouettes matched
+against templates cut from real screenshots), both to set up a game and, mid-game, to work out
+the move you played and the engine's reply.
 
 The wasm build is single-threaded and blocks while it thinks, so in a browser run it in a Web
 Worker, as `web/worker.js` does. `Planner.setMaxNodes(n)` also caps the search by positions
