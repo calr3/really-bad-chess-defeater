@@ -169,7 +169,7 @@
         </div>
         <p id="shotNote" class="note" hidden></p>
         <p class="muted">To fix or set up the board by hand, pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
-        <p class="note">While the board could still be a starting position, a piece placed on the top two rows is black and one on the bottom two rows is white, whichever colour you picked.</p>
+        <p class="note">While the board could still be a starting position, a piece placed on the top two rows is black and one on the bottom two rows is white, whichever colour you picked. With a keyboard, Space picks the next piece and Shift+Space the previous one.</p>
         <div id="palette" role="toolbar" aria-label="Pieces"></div>
         <div class="row">
           <button class="btn secondary" id="fresh" type="button">New board</button>
@@ -306,6 +306,7 @@ const call = (op, args, timeout = 0) => new Promise((resolve, reject) => {
 // ---- state ----
 let mode = 'setup';
 // kings on e8 and e1, where every Really Bad Chess army has them
+const PALETTE = ['K', 'Q', 'R', 'B', 'N', 'P', '.', 'k', 'q', 'r', 'b', 'n', 'p'];
 const NEW_BOARD = '....k...' + '.'.repeat(48) + '....K...';
 const edit = { sq: [...NEW_BOARD], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null, last: null, doubt: [] };
 let game = null;
@@ -380,7 +381,7 @@ function renderBoard() {
 function renderPalette() {
   const pal = $('palette');
   if (!pal.childElementCount) {
-    for (const c of ['K', 'Q', 'R', 'B', 'N', 'P', '.', 'k', 'q', 'r', 'b', 'n', 'p']) {
+    for (const c of PALETTE) {
       const b = document.createElement('button');
       b.type = 'button'; b.dataset.p = c;
       if (c === '.') { b.className = 'erase'; b.textContent = 'Empty'; b.setAttribute('aria-label', 'Empty square'); }
@@ -774,9 +775,15 @@ setInterval(() => {
 }, 250);
 // Space confirms the move on offer: ours (also while the planner looks for a faster win), or the engine's.
 document.addEventListener('keydown', e => {
-  if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey || mode !== 'game') return;
+  if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
   e.preventDefault(); // no scrolling, and no click on a focused button
+  if (mode === 'setup') {
+    // pick the next piece in the palette (Shift+Space: the previous one)
+    const k = PALETTE.indexOf(edit.brush), n = PALETTE.length;
+    edit.brush = PALETTE[(k + (e.shiftKey ? n - 1 : 1)) % n];
+    return renderPalette();
+  }
   if (e.repeat) return;
   const g = game;
   if (g.phase === 'thinking' && g.suggestion) { stopThinking(); commit(game.suggestion); }
