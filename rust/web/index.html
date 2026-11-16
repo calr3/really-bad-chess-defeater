@@ -166,6 +166,7 @@
         </div>
         <p id="shotNote" class="note" hidden></p>
         <p class="muted">To fix or set up the board by hand, pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
+        <p class="note">While the board could still be a starting position, a piece placed on the top two rows is black and one on the bottom two rows is white, whichever colour you picked.</p>
         <div id="palette" role="toolbar" aria-label="Pieces"></div>
         <div class="row">
           <button class="btn secondary" id="clear" type="button">Empty board</button>
@@ -607,9 +608,15 @@ async function undo() {
   try { await newPlanner(); } catch (e) { return showError(e.message); } // the old plan may no longer apply
   await advance();
 }
+function startLike(sq) {
+  return sq.every((c, i) => c === '.' || (i < 16 && c === c.toLowerCase()) || (i >= 48 && c === c.toUpperCase()));
+}
 function squareClicked(i) {
   if (mode === 'setup') {
-    const c = edit.brush;
+    let c = edit.brush;
+    // While the board could still be a starting position (white only on the bottom two ranks,
+    // black only on the top two), a piece placed on those ranks takes the colour of its side.
+    if (c !== '.' && (i < 16 || i >= 48) && startLike(edit.sq)) c = i < 16 ? c.toLowerCase() : c.toUpperCase();
     if (c === 'K' || c === 'k') edit.sq = edit.sq.map(x => x === c ? '.' : x); // one king per side
     edit.sq[i] = edit.sq[i] === c ? '.' : c;
     edit.doubt = edit.doubt.filter(d => d !== i);
