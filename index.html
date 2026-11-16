@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Really Bad Chess Defeater</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Symbols+2&display=swap">
+<style>
+  /* Layout: board on the left, setup or game panel on the right; stacks to one column on phones. */
+  :root {
+    --bg: #f3f5f4; --surface: #ffffff; --fg: #18211e; --muted: #5d6b66; --line: #d6ddda;
+    --sq-light: #e4ebe7; --sq-dark: #7f9a8f; --accent: #2d6cdf; --accent-fg: #ffffff; --reply: #d9822b;
+    --hl: rgba(240, 196, 64, .55); --sel: rgba(45, 108, 223, .45); --dot: rgba(24, 33, 30, .32);
+    --good: #1f8a4c; --bad: #c0392b; --piece-w: #ffffff; --piece-b: #111614; --piece-edge: #111614;
+    --display: "Space Grotesk", system-ui, sans-serif;
+    --body: "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121715; --surface: #1a211e; --fg: #e3ebe7; --muted: #95a59f; --line: #2c3632;
+      --sq-light: #a9bbb3; --sq-dark: #5b7469; --accent: #6b9cf5; --accent-fg: #0d1220; --reply: #f0a052;
+      --hl: rgba(240, 196, 64, .6); --sel: rgba(107, 156, 245, .55); --dot: rgba(10, 14, 12, .4);
+      --good: #4cc27d; --bad: #ef6b5b; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121715; --surface: #1a211e; --fg: #e3ebe7; --muted: #95a59f; --line: #2c3632;
+    --sq-light: #a9bbb3; --sq-dark: #5b7469; --accent: #6b9cf5; --accent-fg: #0d1220; --reply: #f0a052;
+    --hl: rgba(240, 196, 64, .6); --sel: rgba(107, 156, 245, .55); --dot: rgba(10, 14, 12, .4);
+    --good: #4cc27d; --bad: #ef6b5b; color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 24px 40px;
+  }
+  main { max-width: 1000px; margin: 0 auto; display: grid; gap: 20px; }
+  header h1 { font: 700 clamp(1.6rem, 4vw, 2.2rem)/1.1 var(--display); margin: 0 0 6px; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); max-width: 65ch; }
+  h2 { font: 700 1.15rem/1.2 var(--display); margin: 0; }
+  .play { display: grid; grid-template-columns: minmax(0, 480px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 780px) { .play { grid-template-columns: minmax(0, 1fr); } }
+
+  .boardwrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px; }
+  #boardbox { position: relative; aspect-ratio: 1; width: 100%; max-width: 100%; }
+  #board {
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    position: absolute; inset: 0; border-radius: 6px; overflow: hidden;
+    box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(0,0,0,.12);
+  }
+  #board button {
+    all: unset; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer;
+    font-size: clamp(20px, 7.5vw, 46px); line-height: 1; user-select: none;
+  }
+  #board button:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; z-index: 2; }
+  #board .l { background: var(--sq-light); }
+  #board .d { background: var(--sq-dark); }
+  #board .hl::after, #board .sel::after { content: ""; position: absolute; inset: 0; }
+  #board .hl::after { background: var(--hl); }
+  #board .sel::after { background: var(--sel); }
+  #board .hint { box-shadow: inset 0 0 0 4px var(--accent); }
+  #board .target::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); z-index: 2; }
+  #board .target.occ::before { width: 86%; height: 86%; background: transparent; border: 4px solid var(--dot); box-sizing: border-box; }
+  /* A real chess font, and text (not emoji) presentation: phones otherwise draw the pawn as an emoji. */
+  .pc { position: relative; z-index: 1; font-family: "Noto Sans Symbols 2", "Segoe UI Symbol", "DejaVu Sans", sans-serif; font-variant-emoji: text; }
+  .pc.w { color: var(--piece-w); -webkit-text-stroke: 1.2px var(--piece-edge); paint-order: stroke fill; }
+  .pc.b { color: var(--piece-b); }
+  #arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+  #arrows .ours { stroke: var(--accent); fill: var(--accent); opacity: .85; }
+  #arrows .reply { stroke: var(--reply); fill: var(--reply); opacity: .9; }
+  .ranks, .files { display: grid; font: 500 11px var(--mono); color: var(--muted); }
+  .ranks { grid-template-rows: repeat(8, 1fr); align-items: center; padding-right: 2px; }
+  .files { grid-column: 2; grid-template-columns: repeat(8, 1fr); text-align: center; }
+
+  .side { display: grid; gap: 16px; min-width: 0; align-content: start; }
+  .panel { display: grid; gap: 14px; min-width: 0; }
+  .muted { color: var(--muted); margin: 0; }
+  .note { color: var(--muted); font-size: 13px; margin: 0; max-width: 65ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .label { font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .field { display: grid; gap: 4px; }
+  #palette { display: grid; grid-template-columns: repeat(7, minmax(0, 44px)); gap: 6px; }
+  #palette button {
+    all: unset; box-sizing: border-box; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    font-size: 28px; line-height: 1; border-radius: 6px; border: 1px solid var(--line); background: var(--sq-light);
+  }
+  #palette button.erase { font: 600 11px var(--body); color: #18211e; text-align: center; }
+  #palette button[aria-pressed="true"] { border: 2px solid var(--accent); box-shadow: 0 0 0 2px var(--sel); }
+  #palette button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=number], input[type=text] {
+    font: 500 14px var(--mono); padding: 7px 9px; border-radius: 6px; box-sizing: border-box;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg); min-width: 0;
+  }
+  input[type=number] { width: 6.5em; }
+  textarea { font: 13px/1.5 var(--mono); padding: 7px 9px; border-radius: 6px; box-sizing: border-box; width: 100%; resize: vertical;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg); }
+  .record { display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  input[type=text] { width: 100%; }
+  .choice { display: flex; gap: 6px; align-items: center; }
+  button.btn {
+    font: 600 14px var(--body); padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: var(--accent-fg);
+  }
+  button.btn.big { font-size: 16px; padding: 10px 20px; }
+  button.btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  :is(button.btn, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  details > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
+  details > div { padding: 0 12px 12px; display: grid; gap: 10px; }
+  .shot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  label.btn { display: inline-block; font: 600 14px var(--body); padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: var(--accent); color: var(--accent-fg); }
+  label.btn.big { font-size: 16px; padding: 10px 20px; }
+  label.btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+  #board .doubt { outline: 3px dashed var(--bad); outline-offset: -5px; }
+  .progress { display: grid; gap: 4px; }
+  .progress .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .progress .bar span { display: block; height: 100%; width: 0; background: var(--accent); }
+  .error { color: var(--bad); font-weight: 500; margin: 0; }
+
+  .prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
+  .status { display: flex; gap: 10px; align-items: center; }
+  .pill { font: 600 12px var(--body); letter-spacing: .04em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.ours { color: var(--accent); border-color: var(--accent); }
+  .pill.reply { color: var(--reply); border-color: var(--reply); }
+  .pill.win { color: var(--good); border-color: var(--good); }
+  .pill.loss { color: var(--bad); border-color: var(--bad); }
+  .say { font: 600 1.25rem/1.3 var(--display); margin: 0; }
+  .say .mv { font-family: var(--mono); font-weight: 500; }
+  .win { color: var(--good); font-weight: 600; }
+  .warn { color: var(--reply); font-size: 14px; margin: 0; }
+  .moves { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: 320px; }
+  table { border-collapse: collapse; width: 100%; font: 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+  th { font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+  td { padding: 5px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.n { color: var(--muted); }
+  th.num, td.num { text-align: right; }
+  td .off { color: var(--reply); }
+  .empty { padding: 14px 12px; color: var(--muted); font: 14px var(--body); }
+</style>
+</head>
+<body>
+
+<main>
+  <header>
+    <h1>Really Bad Chess Defeater</h1>
+    <p>Set up the board your game is showing. The planner tells you what to play as White, and you enter the engine's replies as they happen. Everything runs in WebAssembly in your browser.</p>
+  </header>
+
+  <section class="play">
+    <div class="boardwrap">
+      <div class="ranks" aria-hidden="true"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span></div>
+      <div id="boardbox">
+        <div id="board" role="grid" aria-label="Chess board"></div>
+        <svg id="arrows" viewBox="0 0 8 8" aria-hidden="true"></svg>
+      </div>
+      <div class="files" aria-hidden="true"><span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span></div>
+    </div>
+
+    <div class="side">
+      <div id="setup" class="panel">
+        <h2>Set up the board</h2>
+        <div class="shot">
+          <label class="btn big" for="shotSetup">Read a screenshot</label>
+          <input type="file" id="shotSetup" accept="image/*" hidden>
+          <span class="note">or paste one. Use a full, uncropped screenshot of the game.</span>
+        </div>
+        <p id="shotNote" class="note" hidden></p>
+        <p class="muted">To fix or set up the board by hand, pick a piece, then tap squares to place it. Tap a square again to empty it. You play White, at the bottom.</p>
+        <p class="note">While the board could still be a starting position, a piece placed on the top two rows is black and one on the bottom two rows is white, whichever colour you picked. With a keyboard, Space picks the next piece and Shift+Space the previous one.</p>
+        <div id="palette" role="toolbar" aria-label="Pieces"></div>
+        <div class="row">
+          <button class="btn secondary" id="fresh" type="button">New board</button>
+          <button class="btn secondary" id="clear" type="button">Empty board</button>
+          <button class="btn secondary" id="standard" type="button">Standard chess</button>
+        </div>
+        <div class="row" role="radiogroup" aria-label="Side to move">
+          <span class="label">To move</span>
+          <label class="choice"><input type="radio" name="side" id="sideW" value="w" checked> White</label>
+          <label class="choice"><input type="radio" name="side" id="sideB" value="b"> Black</label>
+        </div>
+        <div class="row">
+          <label class="choice"><input type="checkbox" id="castleW" checked> White can still castle</label>
+          <label class="choice"><input type="checkbox" id="castleB" checked> Black can still castle</label>
+        </div>
+        <p class="note">Castling counts only with the king on its starting square and a rook in the corner. Untick it if that king or rook has already moved.</p>
+        <details>
+          <summary>Load a ranked board from a seed</summary>
+          <div>
+            <div class="row">
+              <div class="field"><label class="label" for="seed">Seed</label><input id="seed" type="number" value="5000"></div>
+              <div class="field"><label class="label" for="rank">Rank</label><input id="rank" type="number" value="0" min="0" max="120"></div>
+              <button class="btn secondary" id="loadSeed" type="button" style="align-self:end">Load</button>
+            </div>
+          </div>
+        </details>
+        <details>
+          <summary>Paste or copy a position</summary>
+          <div>
+            <input type="text" id="posText" spellcheck="false" autocomplete="off" aria-label="Position text">
+            <div class="row">
+              <button class="btn secondary" id="loadText" type="button">Load pasted position</button>
+              <button class="btn secondary" id="copyText" type="button">Copy</button>
+            </div>
+            <p class="note">Takes a FEN (such as <code>rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq</code>), 64 squares from a8 to h1 using <code>.</code> for empty, or this tool's own position text.</p>
+          </div>
+        </details>
+        <p id="setupError" class="error" hidden></p>
+        <div class="row">
+          <button class="btn big" id="start" type="button">Start</button>
+          <div class="field"><label class="label" for="secs">Seconds per move</label><input id="secs" type="number" value="60" min="1" max="600"></div>
+        </div>
+      </div>
+
+      <div id="game" class="panel" hidden>
+        <div class="prompt">
+          <div class="status"><span id="pill" class="pill">Ready</span><span id="phaseText" class="muted"></span></div>
+          <p id="say" class="say"></p>
+          <p id="warn" class="warn" hidden></p>
+          <div id="progress" class="progress" hidden>
+            <div class="bar" role="progressbar" aria-label="Thinking time used" aria-valuemin="0" aria-valuemax="100"><span id="progressFill"></span></div>
+            <span id="progressText" class="note"></span>
+          </div>
+          <div class="row" id="actions"></div>
+          <p id="hint" class="note"></p>
+        </div>
+        <div id="record" class="record" hidden>
+          <h2>Game record</h2>
+          <div class="field"><label class="label" for="fenOut">Starting position (FEN)</label><input id="fenOut" type="text" readonly spellcheck="false"></div>
+          <div class="field"><label class="label" for="pgnOut">Game (PGN, with the starting position)</label><textarea id="pgnOut" rows="12" readonly spellcheck="false"></textarea></div>
+          <div class="row">
+            <button class="btn secondary" id="copyPgn" type="button">Copy PGN</button>
+            <button class="btn secondary" id="copyFen" type="button">Copy FEN</button>
+          </div>
+          <p class="note">Really Bad Chess allows positions standard chess doesn't, such as pawns on the first rank, and Black's engine can leave its king in check. Some chess tools refuse such games.</p>
+        </div>
+        <div class="row">
+          <button class="btn secondary" id="undo" type="button">Undo</button>
+          <button class="btn secondary" id="edit" type="button">Edit board</button>
+          <label class="btn secondary" for="shotGame">Read a screenshot</label>
+          <input type="file" id="shotGame" accept="image/*" hidden>
+          <div class="field"><label class="label" for="secs2">Seconds per move</label><input id="secs2" type="number" value="60" min="1" max="600"></div>
+          <label class="choice" style="align-self:end"><input type="checkbox" id="auto"> Auto-play both sides</label>
+        </div>
+        <div class="moves">
+          <table>
+            <thead><tr><th>#</th><th>White (you)</th><th>Black (engine)</th><th class="num" title="Material, White minus Black: pawn 1, knight and bishop 3, rook 5, queen 9">Material</th></tr></thead>
+            <tbody id="log"></tbody>
+          </table>
+          <div id="empty" class="empty">No moves yet.</div>
+        </div>
+        <p class="note">The engine's reply is filled in as soon as you enter your move, since the model predicts it exactly. If the game shows a different reply, press Undo and tap the move it played, or read a screenshot of the game (or paste one): the page works out the moves from it.</p>
+        <p class="note">The planner models the game's engine exactly, so its prediction of each reply should match what the game plays. If a reply differs, check the board: a misplaced piece or wrong castling rights changes the engine's choice.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+import { readBoard } from './vision.js';
+const START = 'rnbqkbnrpppppppp................................PPPPPPPPRNBQKBNR';
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const NAME = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
+const $ = id => document.getElementById(id);
+// Material balance from White's side with the usual values (pawn 1, knight 3, bishop 3, rook 5, queen 9).
+const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const material = state => [...state.split(' ')[0]].reduce((sum, c) => c === '.' ? sum : sum + (c === c.toUpperCase() ? 1 : -1) * VALUE[c.toLowerCase()], 0);
+const signed = v => v > 0 ? '+' + v : v < 0 ? '−' + -v : '0';
+const sqName = i => 'abcdefgh'[i & 7] + (8 - (i >> 3));
+const mvText = m => `${sqName(m.f)}–${sqName(m.t)}`;
+const same = (a, b) => !!a && !!b && a.f === b.f && a.t === b.t;
+const secs = () => Math.min(600, Math.max(1, +$('secs').value || 60));
+
+// ---- worker calls ----
+let worker = null, seq = 0;
+const pending = new Map();
+function makeWorker() {
+  const url = new URL('./worker.js', import.meta.url).href;
+  try {
+    return new Worker(url, { type: 'module' });
+  } catch (e) {
+    // The page's files can be served from another origin than the page, and a worker script must
+    // come from the page's own origin. A worker made from a blob is, and it can import the file.
+    const blob = new Blob([`import ${JSON.stringify(url)};`], { type: 'text/javascript' });
+    return new Worker(URL.createObjectURL(blob), { type: 'module' });
+  }
+}
+function startWorker() {
+  worker?.terminate();
+  for (const p of pending.values()) p.reject(new Error('stopped'));
+  pending.clear();
+  try {
+    worker = makeWorker();
+  } catch (e) {
+    worker = null;
+    showError('The engine could not start in this browser: ' + e.message);
+    return;
+  }
+  worker.onmessage = ({ data }) => {
+    const p = pending.get(data.id);
+    if (!p) return;
+    pending.delete(data.id);
+    data.ok ? p.resolve(data.value) : p.reject(new Error(data.error));
+  };
+  worker.onerror = e => showError('The engine could not start: ' + (e.message || 'unknown error'));
+}
+// timeout (ms) is for quick calls only: the planner's own calls take as long as it thinks.
+const call = (op, args, timeout = 0) => new Promise((resolve, reject) => {
+  if (!worker) return reject(new Error('The engine is not running. Reload the page to try again.'));
+  const id = ++seq;
+  pending.set(id, { resolve, reject });
+  worker.postMessage({ id, op, args });
+  if (timeout) setTimeout(() => {
+    if (pending.delete(id)) reject(new Error('The engine did not respond. Reload the page to try again.'));
+  }, timeout);
+});
+
+// ---- state ----
+let mode = 'setup';
+// kings on e8 and e1, where every Really Bad Chess army has them
+const PALETTE = ['K', 'Q', 'R', 'B', 'N', 'P', '.', 'k', 'q', 'r', 'b', 'n', 'p'];
+const NEW_BOARD = '....k...' + '.'.repeat(48) + '....K...';
+const edit = { sq: [...NEW_BOARD], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null, last: null, doubt: [] };
+let game = null;
+
+function buildState() {
+  if (edit.full) return edit.full;
+  const sq = edit.sq.join('');
+  const n = edit.sq.filter(c => c !== '.').length;
+  const wk = edit.castleW && sq[60] === 'K' ? 0 : 1;
+  const bk = edit.castleB && sq[4] === 'k' ? 0 : 1;
+  const last = edit.last && edit.side === 'w' ? `${edit.last.f} ${edit.last.t}` : '255 255';
+  return `${sq} ${edit.side} 0 0 0 0 0 0 ${wk} ${bk} ${n} ${last}`;
+}
+function loadIntoEditor(text) {
+  const parts = text.trim().split(/\s+/);
+  let p = parts[0] || '';
+  p = p.replace(/[1-8]/g, d => '.'.repeat(+d)).replace(/\//g, '');
+  if (p.length !== 64 || /[^kqbnrpKQBNRP.]/.test(p)) throw new Error('That position has the wrong number of squares or an unknown piece letter.');
+  edit.sq = [...p];
+  edit.side = parts[1] === 'b' ? 'b' : 'w';
+  edit.full = null; edit.last = null; edit.doubt = []; $('shotNote').hidden = true;
+  if (parts.length === 13) {
+    edit.castleW = parts[2] === '0' && parts[8] === '0';
+    edit.castleB = parts[3] === '0' && parts[9] === '0';
+    edit.full = parts.join(' ');
+  } else if (parts[2] && /^[KQkq-]+$/.test(parts[2])) {
+    edit.castleW = /[KQ]/.test(parts[2]);
+    edit.castleB = /[kq]/.test(parts[2]);
+  } else {
+    edit.castleW = edit.castleB = true;
+  }
+}
+function editorChanged() { edit.full = null; $('setupError').hidden = true; render(); }
+
+// ---- rendering ----
+function pieceSpan(c) {
+  const s = document.createElement('span');
+  s.className = 'pc ' + (c === c.toUpperCase() ? 'w' : 'b');
+  s.textContent = GLYPH[c.toLowerCase()] + '\uFE0E'; // text presentation selector
+  return s;
+}
+function arrow(m, cls) {
+  const x1 = (m.f & 7) + .5, y1 = (m.f >> 3) + .5, x2 = (m.t & 7) + .5, y2 = (m.t >> 3) + .5;
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
+  const hx = x2 - ux * .42, hy = y2 - uy * .42, px = -uy * .24, py = ux * .24;
+  const f = v => v.toFixed(3);
+  return `<g class="${cls}"><line x1="${f(x1 + ux * .15)}" y1="${f(y1 + uy * .15)}" x2="${f(hx)}" y2="${f(hy)}" stroke-width=".17" stroke-linecap="round"/>` +
+    `<polygon points="${f(x2 - ux * .08)},${f(y2 - uy * .08)} ${f(hx + px)},${f(hy + py)} ${f(hx - px)},${f(hy - py)}" stroke="none"/></g>`;
+}
+function renderBoard() {
+  const squares = mode === 'setup' ? edit.sq : [...game.state.split(' ')[0]];
+  const hl = mode === 'game' && game.last ? [game.last.f, game.last.t] : [];
+  // the suggested move, shown as soon as it is known (a known win's next move is known while the planner still searches)
+  const hint = mode === 'game' && (game.phase === 'ours' || game.phase === 'thinking') && game.suggestion ? game.suggestion : null;
+  const sel = mode === 'game' ? game.selected : null;
+  const targets = sel == null ? [] : game.legal.filter(m => m.f === sel).map(m => m.t);
+  $('board').replaceChildren(...squares.map((c, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = (((i >> 3) + (i & 7)) % 2 ? 'd' : 'l') + (hl.includes(i) ? ' hl' : '') + (sel === i ? ' sel' : '') + (hint && (hint.f === i || hint.t === i) ? ' hint' : '') +
+      (targets.includes(i) ? ' target' + (c !== '.' ? ' occ' : '') : '') + (mode === 'setup' && edit.doubt.includes(i) ? ' doubt' : '');
+    b.setAttribute('aria-label', sqName(i) + (c === '.' ? ' empty' : ` ${c === c.toUpperCase() ? 'white' : 'black'} ${NAME[c.toLowerCase()]}`));
+    if (c !== '.') b.append(pieceSpan(c));
+    b.addEventListener('click', () => squareClicked(i));
+    return b;
+  }));
+  let svg = '';
+  if (hint) svg = arrow(hint, 'ours');
+  if (mode === 'game' && game.phase === 'reply' && game.predicted) svg = arrow(game.predicted, 'reply');
+  $('arrows').innerHTML = svg;
+}
+function renderPalette() {
+  const pal = $('palette');
+  if (!pal.childElementCount) {
+    for (const c of PALETTE) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.p = c;
+      if (c === '.') { b.className = 'erase'; b.textContent = 'Empty'; b.setAttribute('aria-label', 'Empty square'); }
+      else { b.append(pieceSpan(c)); b.setAttribute('aria-label', `${c === c.toUpperCase() ? 'White' : 'Black'} ${NAME[c.toLowerCase()]}`); }
+      b.addEventListener('click', () => { edit.brush = c; renderPalette(); });
+      pal.append(b);
+    }
+  }
+  for (const b of pal.children) b.setAttribute('aria-pressed', String(b.dataset.p === edit.brush));
+}
+function renderSetup() {
+  renderPalette();
+  $('sideW').checked = edit.side === 'w';
+  $('sideB').checked = edit.side === 'b';
+  $('castleW').checked = edit.castleW;
+  $('castleB').checked = edit.castleB;
+  if (document.activeElement !== $('posText')) $('posText').value = buildState();
+}
+function pieceAt(state, i) { return state.split(' ')[0][i]; }
+function describe(state, m) {
+  const c = pieceAt(state, m.f);
+  return c && c !== '.' ? `${NAME[c.toLowerCase()]} ` : '';
+}
+function button(label, fn, cls = 'btn') {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls; b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+function renderGame() {
+  const g = game, pill = $('pill'), say = $('say'), actions = $('actions'), hint = $('hint');
+  actions.replaceChildren();
+  hint.textContent = '';
+  if (g.phase !== 'thinking' || !g.thinkStart) $('progress').hidden = true;
+  const setPill = (cls, text) => { pill.className = 'pill ' + cls; pill.textContent = text; };
+  $('phaseText').textContent = '';
+  if (g.phase === 'starting') { setPill('', 'Loading'); say.textContent = 'Loading the engine…'; }
+  if (g.phase === 'thinking') {
+    setPill('ours', 'Your move');
+    if (g.suggestion) {
+      const s = g.suggestion;
+      say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span><br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>`;
+      $('phaseText').textContent = 'looking for a faster win';
+      actions.append(button('Play it now', () => { stopThinking(); commit(game.suggestion); }, 'btn big'));
+      hint.textContent = 'Press Space to play it now. This is the next move of the win already found. The planner is checking for a faster one, and suggests this move again if it finds none. You can play it without waiting.';
+    } else {
+      $('phaseText').textContent = 'thinking';
+      say.textContent = 'The planner is looking for the fastest win…';
+      actions.append(button('Stop thinking', stopThinking, 'btn secondary'));
+    }
+  }
+  if (g.phase === 'ours') {
+    setPill('ours', 'Your move');
+    if (g.suggestion) {
+      const s = g.suggestion;
+      say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span>` +
+        (s.win ? `<br><span class="win">${s.faster ? 'Found a faster win: ' : 'Forced win in '}${s.win} move${s.win > 1 ? 's' : ''}</span>` : '');
+      $('phaseText').textContent = s.secs == null ? 'from the win found earlier' : `${s.secs.toFixed(1)} s`;
+      actions.append(button('Done, I played it', () => commit(s), 'btn big'));
+      hint.textContent = 'Press Space for “Done, I played it”. Played something else? Tap that move on the board instead.';
+    } else {
+      say.textContent = 'Enter the move you played on the board.';
+      actions.append(button('Suggest a move', think, 'btn'));
+    }
+  }
+  if (g.autoReply && (g.phase === 'thinking' || g.phase === 'ours')) {
+    hint.textContent = (hint.textContent ? hint.textContent + ' ' : '') +
+      `The engine's reply ${mvText(g.autoReply)} was filled in as predicted. If the game played something else, press Undo and tap its move, or read a screenshot.`;
+  }
+  if (g.phase === 'predicting') { setPill('reply', "Engine's move"); say.textContent = 'Working out the engine\'s reply…'; }
+  if (g.phase === 'reply') {
+    setPill('reply', "Engine's move");
+    if (g.predicted) {
+      say.innerHTML = `The engine should reply with the ${describe(g.state, g.predicted)}<span class="mv">${mvText(g.predicted)}</span>`;
+      actions.append(button('Engine played that', () => commit(g.predicted), 'btn big'));
+      hint.textContent = 'Press Space for “Engine played that”. If the game played something else, tap that move on the board.';
+    } else {
+      say.textContent = "Enter Black's move on the board.";
+    }
+  }
+  if (g.phase === 'over') {
+    setPill(g.won ? 'win' : 'loss', g.won ? 'Won' : 'Lost');
+    say.textContent = g.won ? `White wins in ${g.log.filter(e => e.ours).length} moves.` : 'Black wins.';
+  }
+  $('record').hidden = !(g.phase === 'over' && g.record);
+  if (g.record && $('pgnOut').value !== g.record.text) { $('pgnOut').value = g.record.text; $('fenOut').value = g.record.fen; }
+  $('warn').hidden = !g.warn;
+  $('warn').textContent = g.warn || '';
+  $('undo').disabled = !g.undo.length;
+  $('empty').hidden = g.log.length > 0;
+  $('log').replaceChildren(...g.log.map(e => {
+    const tr = document.createElement('tr');
+    const td = (html, cls) => { const c = document.createElement('td'); c.innerHTML = html; if (cls) c.className = cls; tr.append(c); };
+    td(String(e.n), 'n');
+    td(e.ours ? mvText(e.ours) + (e.ours.win ? ` <span class="win">win in ${e.ours.win}</span>` : '') + (e.ours.own ? ' <span class="off">(own)</span>' : '') : '…');
+    td(e.reply ? mvText(e.reply) + (e.reply.off ? ` <span class="off">(expected ${mvText(e.reply.off)})</span>` : '') : '');
+    // after White's move and, if Black's reply changed it, after Black's
+    const a = e.ours?.mat, b = e.reply?.mat;
+    td(a != null && b != null && a !== b ? `${signed(a)} → ${signed(b)}` : signed(b ?? a ?? 0), 'num');
+    return tr;
+  }));
+  $('log').lastElementChild?.scrollIntoView({ block: 'nearest' });
+}
+function render() {
+  $('setup').hidden = mode !== 'setup';
+  $('game').hidden = mode !== 'game';
+  if (mode === 'setup') renderSetup(); else renderGame();
+  renderBoard();
+}
+function showError(msg) {
+  if (mode === 'setup') { $('setupError').textContent = msg; $('setupError').hidden = false; }
+  else if (game) { game.warn = msg; render(); }
+}
+
+// ---- game flow ----
+async function startGame() {
+  const sq = edit.sq.join('');
+  const count = c => [...sq].filter(x => x === c).length;
+  if (count('K') !== 1 || count('k') !== 1) return showError('Each side needs exactly one king.');
+  const state = buildState();
+  try {
+    $('start').disabled = true;
+    await call('legal', { state }, 30000);
+  } catch (e) {
+    return showError(/engine/.test(e.message) ? e.message : 'That position could not be read: ' + e.message);
+  } finally {
+    $('start').disabled = false;
+  }
+  game = { start: state, record: null, state, phase: 'starting', log: [], undo: [], ours: null, last: null, legal: [], selected: null, suggestion: null, predicted: null, warn: null, plannerSecs: null };
+  mode = 'game';
+  render();
+  await advance();
+}
+async function newPlanner(line = '') {
+  await call('planner', { seconds: secs() });
+  if (line) await call('setPlanLine', { line });
+  game.plannerSecs = secs();
+}
+async function advance() {
+  const g = game;
+  g.selected = null; g.suggestion = null; g.predicted = null;
+  let ls;
+  try { ls = await call('legal', { state: g.state }); } catch (e) { if (e.message !== 'stopped') showError(e.message); return; }
+  if (g !== game) return;
+  g.legal = ls ? ls.split(' ').map(x => { const [f, t] = x.split('-').map(Number); return { f, t }; }) : [];
+  const [board, side] = g.state.split(' ');
+  const white = side === 'w';
+  if (!board.includes('K') || (white && !g.legal.length)) return over(false);
+  if (!board.includes('k') || (!white && !g.legal.length)) return over(true);
+  if (white) await think(); else await predict();
+}
+function over(won) {
+  const g = game;
+  g.phase = 'over'; g.won = won; g.record = null; render();
+  const moves = g.log.flatMap(e => [e.ours, e.reply].filter(Boolean)).map(m => ({ f: m.f, t: m.t }));
+  call('notation', { start: g.start, moves }, 30000).then(r => {
+    if (game !== g || g.phase !== 'over') return;
+    g.record = pgn(r, g.start, won);
+    render();
+  }).catch(e => showError(e.message));
+}
+function pgn({ fen, san }, start, won) {
+  const blackFirst = start.split(' ')[1] === 'b', result = won ? '1-0' : '0-1';
+  const d = new Date(), date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  const words = [];
+  san.forEach((m, k) => {
+    const ply = k + (blackFirst ? 1 : 0), n = (ply >> 1) + 1;
+    if (ply % 2 === 0) words.push(`${n}.`); else if (k === 0) words.push(`${n}...`);
+    words.push(m);
+  });
+  words.push(result);
+  const lines = [];
+  for (const w of words) {
+    if (lines.length && lines[lines.length - 1].length + 1 + w.length <= 80) lines[lines.length - 1] += ' ' + w;
+    else lines.push(w);
+  }
+  const tags = [['Event', 'Really Bad Chess'], ['Date', date], ['White', 'Really Bad Chess Defeater'], ['Black', 'Really Bad Chess engine'],
+    ['Result', result], ['SetUp', '1'], ['FEN', fen]];
+  return { fen, text: tags.map(([k, v]) => `[${k} "${v}"]`).join('\n') + '\n\n' + lines.join('\n') + '\n' };
+}
+async function think() {
+  const g = game;
+  g.phase = 'thinking'; g.suggestion = null; g.planLine = ''; render();
+  try {
+    // A win found earlier is still on if the engine replied as expected: offer its next move at once.
+    if (g.plannerSecs !== null) g.planLine = await call('planLine');
+    if (g.plannerSecs !== secs()) await newPlanner(g.planLine);
+    if (g !== game || g.phase !== 'thinking') return;
+    const first = g.planLine.split(' ')[0];
+    if (first) {
+      const [f, t] = first.split('-').map(Number);
+      if (g.legal.some(m => m.f === f && m.t === t)) {
+        g.suggestion = { f, t, win: g.planLine.split(' ').length / 2, secs: null, planned: true };
+        render();
+      }
+    }
+    g.thinkStart = performance.now(); g.thinkSecs = secs();
+    let r;
+    try { r = await call('choose', { state: g.state }); } finally { g.thinkStart = null; }
+    if (g !== game || g.phase !== 'thinking') return;
+    if (r.c) {
+      const [mv, , win] = r.c.split(' ');
+      const [f, t] = mv.split('-').map(Number);
+      const before = g.suggestion?.planned ? g.suggestion.win : null;
+      g.suggestion = { f, t, win: win ? +win : null, secs: r.secs, faster: before !== null && win && +win < before };
+    }
+  } catch (e) {
+    if (e.message === 'stopped') return;
+    g.warn = e.message;
+  }
+  g.phase = 'ours'; render();
+  if ($('auto').checked && g.suggestion) setTimeout(() => game === g && g.phase === 'ours' && commit(g.suggestion), 400);
+}
+function stopThinking() {
+  const g = game, keep = g.suggestion?.planned ? g.suggestion : null;
+  startWorker(); // the planner goes with the old worker; start a new one that keeps the plan
+  g.plannerSecs = null;
+  if (worker) {
+    call('planner', { seconds: secs() }).catch(e => showError(e.message));
+    if (g.planLine) call('setPlanLine', { line: g.planLine }).catch(e => showError(e.message));
+    g.plannerSecs = secs(); // the worker runs these before anything sent later
+  }
+  g.phase = 'ours'; g.suggestion = keep; render();
+}
+async function predict() {
+  const g = game;
+  g.phase = 'predicting'; render();
+  try {
+    const r = await call('engine', { state: g.state });
+    if (g !== game) return;
+    if (r) { const [f, t] = r.split('-').map(Number); g.predicted = { f, t }; }
+  } catch (e) { if (e.message === 'stopped') return; g.warn = e.message; }
+  g.phase = 'reply'; render();
+  // Play the predicted reply straight away, unless the user went back to enter a different one.
+  if (g.predicted && !g.noAutoReply) commit(g.predicted, true);
+}
+async function commit(m, auto = false) {
+  const g = game;
+  if (g.phase !== 'ours' && g.phase !== 'reply') return;
+  const white = g.state.split(' ')[1] === 'w';
+  g.undo.push(JSON.stringify({ state: g.state, ours: g.ours, last: g.last, log: g.log }));
+  g.phase = 'busy';
+  let next;
+  try { next = await call('play', { state: g.state, f: m.f, t: m.t }); }
+  catch (e) { g.undo.pop(); g.phase = white ? 'ours' : 'reply'; showError(e.message); return; }
+  g.warn = null;
+  if (white) {
+    const followed = same(m, g.suggestion);
+    g.ours = { f: m.f, t: m.t };
+    g.autoReply = null;
+    g.log.push({ n: g.log.length + 1, ours: { f: m.f, t: m.t, win: followed ? g.suggestion.win : null, own: !!g.suggestion && !followed, mat: material(next) }, reply: null });
+  } else {
+    const off = g.predicted && !same(m, g.predicted) ? { ...g.predicted } : null;
+    let e = g.log[g.log.length - 1];
+    if (!e || e.reply) { e = { n: g.log.length + 1, ours: null, reply: null }; g.log.push(e); }
+    e.reply = { f: m.f, t: m.t, off, mat: material(next) };
+    g.autoReply = auto ? { f: m.f, t: m.t } : null;
+    g.noAutoReply = false;
+    if (off) g.warn = `The model expected ${mvText(off)}, but you entered ${mvText(m)}. If that is what the game played, the board here probably differs from the game's (a piece, or castling rights). The planner carries on from the position you entered.`;
+    if (g.ours) {
+      try {
+        if (g.plannerSecs === null) await newPlanner();
+        await call('observe', { of: g.ours.f, ot: g.ours.t, rf: m.f, rt: m.t });
+      } catch (e2) { if (e2.message !== 'stopped') g.warn = e2.message; }
+    }
+    g.ours = null;
+  }
+  g.last = { f: m.f, t: m.t };
+  g.state = next;
+  await advance();
+}
+async function undo() {
+  const g = game;
+  if (!g.undo.length) return;
+  if (g.phase === 'thinking' || g.phase === 'predicting') startWorker();
+  Object.assign(g, JSON.parse(g.undo.pop()));
+  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null; g.autoReply = null; g.record = null;
+  g.noAutoReply = g.state.split(' ')[1] === 'b'; // back at the engine's move: let the user enter it
+  render();
+  try { await newPlanner(); } catch (e) { return showError(e.message); } // the old plan may no longer apply
+  await advance();
+}
+function startLike(sq) {
+  return sq.every((c, i) => c === '.' || (i < 16 && c === c.toLowerCase()) || (i >= 48 && c === c.toUpperCase()));
+}
+function squareClicked(i) {
+  if (mode === 'setup') {
+    let c = edit.brush;
+    // While the board could still be a starting position (white only on the bottom two ranks,
+    // black only on the top two), a piece placed on those ranks takes the colour of its side.
+    if (c !== '.' && (i < 16 || i >= 48) && startLike(edit.sq)) c = i < 16 ? c.toLowerCase() : c.toUpperCase();
+    if (c === 'K' || c === 'k') edit.sq = edit.sq.map(x => x === c ? '.' : x); // one king per side
+    edit.sq[i] = edit.sq[i] === c ? '.' : c;
+    edit.doubt = edit.doubt.filter(d => d !== i);
+    return editorChanged();
+  }
+  const g = game;
+  if (g.phase !== 'ours' && g.phase !== 'reply') return;
+  if (g.selected != null) {
+    const m = g.legal.find(m => m.f === g.selected && m.t === i);
+    if (m) { g.selected = null; return commit(m); }
+  }
+  g.selected = g.legal.some(m => m.f === i) && g.selected !== i ? i : null;
+  renderBoard();
+}
+
+// ---- controls ----
+$('fresh').addEventListener('click', () => {
+  edit.sq = [...NEW_BOARD];
+  edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged();
+});
+$('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); edit.last = null; edit.doubt = []; editorChanged(); });
+$('standard').addEventListener('click', () => { edit.sq = [...START]; edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged(); });
+
+// ---- screenshots ----
+async function readShot(file) {
+  const bmp = await createImageBitmap(file);
+  const cv = document.createElement('canvas');
+  cv.width = bmp.width; cv.height = bmp.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const r = readBoard(ctx.getImageData(0, 0, cv.width, cv.height));
+  if (!r) throw new Error("Couldn't find the board in that image. Use a full, uncropped screenshot of the game screen.");
+  const kings = [...r.squares].filter(c => c === 'K').length + [...r.squares].filter(c => c === 'k').length;
+  if (kings < 2) throw new Error("Couldn't find both kings in that image. Is it a screenshot of a game in progress?");
+  return r;
+}
+async function shotToEditor(file) {
+  let r;
+  try { r = await readShot(file); } catch (e) { return showError(e.message); }
+  loadIntoEditor(r.squares);
+  edit.side = 'w';
+  edit.last = r.last;
+  edit.doubt = r.cells.map((c, i) => c.piece !== '.' && (c.margin < 0.04 || c.score < 0.7) ? i : -1).filter(i => i >= 0);
+  const pieces = [...r.squares].filter(c => c !== '.').length;
+  $('shotNote').textContent = `Read ${pieces} pieces` + (r.last ? `, and the engine's last move, ${mvText(r.last)}` : '') + '. ' +
+    (edit.doubt.length ? `Check the ${edit.doubt.length} square${edit.doubt.length > 1 ? 's' : ''} outlined in red, then press Start.` : 'Check the board, then press Start.');
+  $('shotNote').hidden = false;
+  $('setupError').hidden = true;
+  render();
+}
+async function shotToGame(file) {
+  const g = game;
+  if (!['ours', 'reply', 'thinking'].includes(g.phase)) return showError('Wait a moment, then read the screenshot again.');
+  let r, path;
+  try { r = await readShot(file); } catch (e) { return showError(e.message); }
+  if (game !== g) return;
+  if (r.squares === g.state.split(' ')[0]) { g.warn = 'That screenshot shows the position already on the board here, so there is nothing new to enter.'; return render(); }
+  if (g.phase === 'thinking') stopThinking(); // the worker is busy while the planner thinks
+  try {
+    path = await call('match', { state: g.state, target: r.squares });
+    if (path === null && g.autoReply) {
+      // The engine's reply was filled in as predicted; see whether the game played another one.
+      const before = JSON.parse(g.undo[g.undo.length - 1]);
+      const alt = await call('match', { state: before.state, target: r.squares });
+      if (alt && alt.length === 1) {
+        const predicted = g.autoReply;
+        Object.assign(g, before);
+        g.autoReply = null; g.suggestion = null; g.predicted = predicted; g.phase = 'reply'; g.undo.pop();
+        path = alt;
+      }
+    }
+  } catch (e) { return showError(e.message); }
+  if (game !== g) return;
+  if (path === null) return showError("That screenshot isn't one or two moves on from the position here. If the board has drifted, press Edit board and read the screenshot there.");
+  if (path.length === 2) g.noAutoReply = true; // the screenshot shows the engine's reply: use that one
+  if (!path.length) { g.warn = 'That screenshot shows the position already on the board here, so there is nothing new to enter.'; return render(); }
+  for (let k = 0; k < path.length; k++) {
+    const done = commit(path[k]);
+    if (k < path.length - 1) await done;
+  }
+}
+for (const [id, fn] of [['shotSetup', shotToEditor], ['shotGame', shotToGame]]) {
+  $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) fn(f); });
+}
+document.addEventListener('paste', e => {
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+  if (!f) return;
+  e.preventDefault();
+  if (mode === 'setup') shotToEditor(f); else shotToGame(f);
+});
+for (const id of ['sideW', 'sideB']) $(id).addEventListener('change', e => { edit.side = e.target.value; editorChanged(); });
+$('castleW').addEventListener('change', e => { edit.castleW = e.target.checked; editorChanged(); });
+$('castleB').addEventListener('change', e => { edit.castleB = e.target.checked; editorChanged(); });
+$('loadSeed').addEventListener('click', async () => {
+  try { loadIntoEditor(await call('ranked', { seed: +$('seed').value, rank: +$('rank').value })); editorChanged(); }
+  catch (e) { showError(e.message); }
+});
+$('loadText').addEventListener('click', () => {
+  try { loadIntoEditor($('posText').value); $('setupError').hidden = true; $('posText').blur(); render(); }
+  catch (e) { showError(e.message); }
+});
+$('copyText').addEventListener('click', () => {
+  const inp = $('posText');
+  navigator.clipboard.writeText(inp.value).catch(() => { inp.focus(); inp.select(); });
+});
+$('start').addEventListener('click', startGame);
+for (const [btn, out] of [['copyPgn', 'pgnOut'], ['copyFen', 'fenOut']]) {
+  $(btn).addEventListener('click', () => {
+    const el = $(out);
+    navigator.clipboard.writeText(el.value).then(() => { $(btn).textContent = 'Copied'; setTimeout(() => { $(btn).textContent = btn === 'copyPgn' ? 'Copy PGN' : 'Copy FEN'; }, 1500); })
+      .catch(() => { el.focus(); el.select(); });
+  });
+}
+$('undo').addEventListener('click', undo);
+$('edit').addEventListener('click', () => {
+  if (game.phase === 'thinking' || game.phase === 'predicting') startWorker();
+  loadIntoEditor(game.state);
+  edit.full = null;
+  mode = 'setup'; game = null;
+  render();
+});
+const syncSecs = src => { $('secs').value = $('secs2').value = src.value; };
+$('secs').addEventListener('change', e => syncSecs(e.target));
+$('secs2').addEventListener('change', e => syncSecs(e.target));
+$('auto').addEventListener('change', e => {
+  if (!e.target.checked || mode !== 'game') return;
+  if (game.phase === 'ours' && game.suggestion) commit(game.suggestion);
+  if (game.phase === 'reply' && game.predicted) commit(game.predicted);
+});
+
+// Thinking progress: the planner runs for its full time unless it runs out of things to search.
+setInterval(() => {
+  const g = mode === 'game' ? game : null, on = !!(g && g.phase === 'thinking' && g.thinkStart);
+  $('progress').hidden = !on;
+  if (!on) return;
+  const used = (performance.now() - g.thinkStart) / 1000, frac = Math.min(1, used / g.thinkSecs);
+  $('progressFill').style.width = (frac * 100).toFixed(1) + '%';
+  $('progressFill').parentElement.setAttribute('aria-valuenow', Math.round(frac * 100));
+  $('progressText').textContent = frac < 1 ? `${Math.ceil(g.thinkSecs - used)} s left of ${g.thinkSecs} s` : 'Finishing…';
+}, 250);
+// Space confirms the move on offer: ours (also while the planner looks for a faster win), or the engine's.
+document.addEventListener('keydown', e => {
+  if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  e.preventDefault(); // no scrolling, and no click on a focused button
+  if (mode === 'setup') {
+    // pick the next piece in the palette (Shift+Space: the previous one)
+    const k = PALETTE.indexOf(edit.brush), n = PALETTE.length;
+    edit.brush = PALETTE[(k + (e.shiftKey ? n - 1 : 1)) % n];
+    return renderPalette();
+  }
+  if (e.repeat) return;
+  const g = game;
+  if (g.phase === 'thinking' && g.suggestion) { stopThinking(); commit(game.suggestion); }
+  else if (g.phase === 'ours' && g.suggestion) commit(g.suggestion);
+  else if (g.phase === 'reply' && g.predicted) commit(g.predicted);
+});
+window.addEventListener('unhandledrejection', e => showError(String(e.reason?.message ?? e.reason)));
+render();
+startWorker();
+</script>
+</body>
+</html>
