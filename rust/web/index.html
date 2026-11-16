@@ -305,7 +305,9 @@ const call = (op, args, timeout = 0) => new Promise((resolve, reject) => {
 
 // ---- state ----
 let mode = 'setup';
-const edit = { sq: [...START], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null, last: null, doubt: [] };
+// kings on e8 and e1, where every Really Bad Chess army has them
+const NEW_BOARD = '....k...' + '.'.repeat(48) + '....K...';
+const edit = { sq: [...NEW_BOARD], side: 'w', castleW: true, castleB: true, brush: 'Q', full: null, last: null, doubt: [] };
 let game = null;
 
 function buildState() {
@@ -654,8 +656,7 @@ function squareClicked(i) {
 
 // ---- controls ----
 $('fresh').addEventListener('click', () => {
-  // kings on e8 and e1, where every Really Bad Chess army has them
-  edit.sq = Array(64).fill('.'); edit.sq[4] = 'k'; edit.sq[60] = 'K';
+  edit.sq = [...NEW_BOARD];
   edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged();
 });
 $('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); edit.last = null; edit.doubt = []; editorChanged(); });
@@ -774,7 +775,6 @@ setInterval(() => {
 window.addEventListener('unhandledrejection', e => showError(String(e.reason?.message ?? e.reason)));
 render();
 startWorker();
-call('ranked', { seed: 5000, rank: 0 }, 30000).then(s => { if (mode === 'setup' && edit.sq.join('') === START) { loadIntoEditor(s); render(); } }).catch(e => showError(e.message));
 </script>
 </body>
 </html>
