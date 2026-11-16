@@ -115,6 +115,9 @@
   label.btn.big { font-size: 16px; padding: 10px 20px; }
   label.btn.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
   #board .doubt { outline: 3px dashed var(--bad); outline-offset: -5px; }
+  .progress { display: grid; gap: 4px; }
+  .progress .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .progress .bar span { display: block; height: 100%; width: 0; background: var(--accent); }
   .error { color: var(--bad); font-weight: 500; margin: 0; }
 
   .prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
@@ -207,7 +210,7 @@
         <p id="setupError" class="error" hidden></p>
         <div class="row">
           <button class="btn big" id="start" type="button">Start</button>
-          <div class="field"><label class="label" for="secs">Seconds per move</label><input id="secs" type="number" value="20" min="1" max="600"></div>
+          <div class="field"><label class="label" for="secs">Seconds per move</label><input id="secs" type="number" value="60" min="1" max="600"></div>
         </div>
       </div>
 
@@ -216,6 +219,10 @@
           <div class="status"><span id="pill" class="pill">Ready</span><span id="phaseText" class="muted"></span></div>
           <p id="say" class="say"></p>
           <p id="warn" class="warn" hidden></p>
+          <div id="progress" class="progress" hidden>
+            <div class="bar" role="progressbar" aria-label="Thinking time used" aria-valuemin="0" aria-valuemax="100"><span id="progressFill"></span></div>
+            <span id="progressText" class="note"></span>
+          </div>
           <div class="row" id="actions"></div>
           <p id="hint" class="note"></p>
         </div>
@@ -224,7 +231,7 @@
           <button class="btn secondary" id="edit" type="button">Edit board</button>
           <label class="btn secondary" for="shotGame">Read a screenshot</label>
           <input type="file" id="shotGame" accept="image/*" hidden>
-          <div class="field"><label class="label" for="secs2">Seconds per move</label><input id="secs2" type="number" value="20" min="1" max="600"></div>
+          <div class="field"><label class="label" for="secs2">Seconds per move</label><input id="secs2" type="number" value="60" min="1" max="600"></div>
           <label class="choice" style="align-self:end"><input type="checkbox" id="auto"> Auto-play both sides</label>
         </div>
         <div class="moves">
@@ -250,7 +257,7 @@ const $ = id => document.getElementById(id);
 const sqName = i => 'abcdefgh'[i & 7] + (8 - (i >> 3));
 const mvText = m => `${sqName(m.f)}–${sqName(m.t)}`;
 const same = (a, b) => !!a && !!b && a.f === b.f && a.t === b.t;
-const secs = () => Math.min(600, Math.max(1, +$('secs').value || 20));
+const secs = () => Math.min(600, Math.max(1, +$('secs').value || 60));
 
 // ---- worker calls ----
 let worker = null, seq = 0;
@@ -405,6 +412,7 @@ function renderGame() {
   const g = game, pill = $('pill'), say = $('say'), actions = $('actions'), hint = $('hint');
   actions.replaceChildren();
   hint.textContent = '';
+  if (g.phase !== 'thinking' || !g.thinkStart) $('progress').hidden = true;
   const setPill = (cls, text) => { pill.className = 'pill ' + cls; pill.textContent = text; };
   $('phaseText').textContent = '';
   if (g.phase === 'starting') { setPill('', 'Loading'); say.textContent = 'Loading the engine…'; }
@@ -413,11 +421,11 @@ function renderGame() {
     if (g.suggestion) {
       const s = g.suggestion;
       say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span><br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>`;
-      $('phaseText').textContent = `looking for a faster win, up to ${secs()} s`;
+      $('phaseText').textContent = 'looking for a faster win';
       actions.append(button('Play it now', () => { stopThinking(); commit(game.suggestion); }, 'btn big'));
       hint.textContent = 'This is the next move of the win already found. The planner is checking for a faster one, and suggests this move again if it finds none. You can play it without waiting.';
     } else {
-      $('phaseText').textContent = `thinking, up to ${secs()} s`;
+      $('phaseText').textContent = 'thinking';
       say.textContent = 'The planner is looking for the fastest win…';
       actions.append(button('Stop thinking', stopThinking, 'btn secondary'));
     }
@@ -530,7 +538,9 @@ async function think() {
         render();
       }
     }
-    const r = await call('choose', { state: g.state });
+    g.thinkStart = performance.now(); g.thinkSecs = secs();
+    let r;
+    try { r = await call('choose', { state: g.state }); } finally { g.thinkStart = null; }
     if (g !== game || g.phase !== 'thinking') return;
     if (r.c) {
       const [mv, , win] = r.c.split(' ');
@@ -727,6 +737,16 @@ $('auto').addEventListener('change', e => {
   if (game.phase === 'reply' && game.predicted) commit(game.predicted);
 });
 
+// Thinking progress: the planner runs for its full time unless it runs out of things to search.
+setInterval(() => {
+  const g = mode === 'game' ? game : null, on = !!(g && g.phase === 'thinking' && g.thinkStart);
+  $('progress').hidden = !on;
+  if (!on) return;
+  const used = (performance.now() - g.thinkStart) / 1000, frac = Math.min(1, used / g.thinkSecs);
+  $('progressFill').style.width = (frac * 100).toFixed(1) + '%';
+  $('progressFill').parentElement.setAttribute('aria-valuenow', Math.round(frac * 100));
+  $('progressText').textContent = frac < 1 ? `${Math.ceil(g.thinkSecs - used)} s left of ${g.thinkSecs} s` : 'Finishing…';
+}, 250);
 window.addEventListener('unhandledrejection', e => showError(String(e.reason?.message ?? e.reason)));
 render();
 startWorker();
