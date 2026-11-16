@@ -169,6 +169,7 @@
         <p class="note">While the board could still be a starting position, a piece placed on the top two rows is black and one on the bottom two rows is white, whichever colour you picked.</p>
         <div id="palette" role="toolbar" aria-label="Pieces"></div>
         <div class="row">
+          <button class="btn secondary" id="fresh" type="button">New board</button>
           <button class="btn secondary" id="clear" type="button">Empty board</button>
           <button class="btn secondary" id="standard" type="button">Standard chess</button>
         </div>
@@ -633,6 +634,11 @@ function squareClicked(i) {
 }
 
 // ---- controls ----
+$('fresh').addEventListener('click', () => {
+  // kings on e8 and e1, where every Really Bad Chess army has them
+  edit.sq = Array(64).fill('.'); edit.sq[4] = 'k'; edit.sq[60] = 'K';
+  edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged();
+});
 $('clear').addEventListener('click', () => { edit.sq = Array(64).fill('.'); edit.last = null; edit.doubt = []; editorChanged(); });
 $('standard').addEventListener('click', () => { edit.sq = [...START]; edit.side = 'w'; edit.castleW = edit.castleB = true; edit.last = null; edit.doubt = []; editorChanged(); });
 
