@@ -97,6 +97,9 @@
     border: 1px solid var(--line); background: var(--surface); color: var(--fg); min-width: 0;
   }
   input[type=number] { width: 6.5em; }
+  textarea { font: 13px/1.5 var(--mono); padding: 7px 9px; border-radius: 6px; box-sizing: border-box; width: 100%; resize: vertical;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg); }
+  .record { display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
   input[type=text] { width: 100%; }
   .choice { display: flex; gap: 6px; align-items: center; }
   button.btn {
@@ -226,6 +229,16 @@
           </div>
           <div class="row" id="actions"></div>
           <p id="hint" class="note"></p>
+        </div>
+        <div id="record" class="record" hidden>
+          <h2>Game record</h2>
+          <div class="field"><label class="label" for="fenOut">Starting position (FEN)</label><input id="fenOut" type="text" readonly spellcheck="false"></div>
+          <div class="field"><label class="label" for="pgnOut">Game (PGN, with the starting position)</label><textarea id="pgnOut" rows="12" readonly spellcheck="false"></textarea></div>
+          <div class="row">
+            <button class="btn secondary" id="copyPgn" type="button">Copy PGN</button>
+            <button class="btn secondary" id="copyFen" type="button">Copy FEN</button>
+          </div>
+          <p class="note">Really Bad Chess allows positions standard chess doesn't, such as pawns on the first rank, and Black's engine can leave its king in check. Some chess tools refuse such games.</p>
         </div>
         <div class="row">
           <button class="btn secondary" id="undo" type="button">Undo</button>
@@ -471,6 +484,8 @@ function renderGame() {
     setPill(g.won ? 'win' : 'loss', g.won ? 'Won' : 'Lost');
     say.textContent = g.won ? `White wins in ${g.log.filter(e => e.ours).length} moves.` : 'Black wins.';
   }
+  $('record').hidden = !(g.phase === 'over' && g.record);
+  if (g.record && $('pgnOut').value !== g.record.text) { $('pgnOut').value = g.record.text; $('fenOut').value = g.record.fen; }
   $('warn').hidden = !g.warn;
   $('warn').textContent = g.warn || '';
   $('undo').disabled = !g.undo.length;
@@ -513,7 +528,7 @@ async function startGame() {
   } finally {
     $('start').disabled = false;
   }
-  game = { state, phase: 'starting', log: [], undo: [], ours: null, last: null, legal: [], selected: null, suggestion: null, predicted: null, warn: null, plannerSecs: null };
+  game = { start: state, record: null, state, phase: 'starting', log: [], undo: [], ours: null, last: null, legal: [], selected: null, suggestion: null, predicted: null, warn: null, plannerSecs: null };
   mode = 'game';
   render();
   await advance();
@@ -536,7 +551,35 @@ async function advance() {
   if (!board.includes('k') || (!white && !g.legal.length)) return over(true);
   if (white) await think(); else await predict();
 }
-function over(won) { game.phase = 'over'; game.won = won; render(); }
+function over(won) {
+  const g = game;
+  g.phase = 'over'; g.won = won; g.record = null; render();
+  const moves = g.log.flatMap(e => [e.ours, e.reply].filter(Boolean)).map(m => ({ f: m.f, t: m.t }));
+  call('notation', { start: g.start, moves }, 30000).then(r => {
+    if (game !== g || g.phase !== 'over') return;
+    g.record = pgn(r, g.start, won);
+    render();
+  }).catch(e => showError(e.message));
+}
+function pgn({ fen, san }, start, won) {
+  const blackFirst = start.split(' ')[1] === 'b', result = won ? '1-0' : '0-1';
+  const d = new Date(), date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  const words = [];
+  san.forEach((m, k) => {
+    const ply = k + (blackFirst ? 1 : 0), n = (ply >> 1) + 1;
+    if (ply % 2 === 0) words.push(`${n}.`); else if (k === 0) words.push(`${n}...`);
+    words.push(m);
+  });
+  words.push(result);
+  const lines = [];
+  for (const w of words) {
+    if (lines.length && lines[lines.length - 1].length + 1 + w.length <= 80) lines[lines.length - 1] += ' ' + w;
+    else lines.push(w);
+  }
+  const tags = [['Event', 'Really Bad Chess'], ['Date', date], ['White', 'Really Bad Chess Defeater'], ['Black', 'Really Bad Chess engine'],
+    ['Result', result], ['SetUp', '1'], ['FEN', fen]];
+  return { fen, text: tags.map(([k, v]) => `[${k} "${v}"]`).join('\n') + '\n\n' + lines.join('\n') + '\n' };
+}
 async function think() {
   const g = game;
   g.phase = 'thinking'; g.suggestion = null; g.planLine = ''; render();
@@ -633,7 +676,7 @@ async function undo() {
   if (!g.undo.length) return;
   if (g.phase === 'thinking' || g.phase === 'predicting') startWorker();
   Object.assign(g, JSON.parse(g.undo.pop()));
-  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null; g.autoReply = null;
+  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null; g.autoReply = null; g.record = null;
   g.noAutoReply = g.state.split(' ')[1] === 'b'; // back at the engine's move: let the user enter it
   render();
   try { await newPlanner(); } catch (e) { return showError(e.message); } // the old plan may no longer apply
@@ -754,6 +797,13 @@ $('copyText').addEventListener('click', () => {
   navigator.clipboard.writeText(inp.value).catch(() => { inp.focus(); inp.select(); });
 });
 $('start').addEventListener('click', startGame);
+for (const [btn, out] of [['copyPgn', 'pgnOut'], ['copyFen', 'fenOut']]) {
+  $(btn).addEventListener('click', () => {
+    const el = $(out);
+    navigator.clipboard.writeText(el.value).then(() => { $(btn).textContent = 'Copied'; setTimeout(() => { $(btn).textContent = btn === 'copyPgn' ? 'Copy PGN' : 'Copy FEN'; }, 1500); })
+      .catch(() => { el.focus(); el.select(); });
+  });
+}
 $('undo').addEventListener('click', undo);
 $('edit').addEventListener('click', () => {
   if (game.phase === 'thinking' || game.phase === 'predicting') startWorker();
