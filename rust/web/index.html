@@ -63,6 +63,7 @@
   #board .hl::after, #board .sel::after { content: ""; position: absolute; inset: 0; }
   #board .hl::after { background: var(--hl); }
   #board .sel::after { background: var(--sel); }
+  #board .hint { box-shadow: inset 0 0 0 4px var(--accent); }
   #board .target::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); z-index: 2; }
   #board .target.occ::before { width: 86%; height: 86%; background: transparent; border: 4px solid var(--dot); box-sizing: border-box; }
   /* A real chess font, and text (not emoji) presentation: phones otherwise draw the pawn as an emoji. */
@@ -346,12 +347,14 @@ function arrow(m, cls) {
 function renderBoard() {
   const squares = mode === 'setup' ? edit.sq : [...game.state.split(' ')[0]];
   const hl = mode === 'game' && game.last ? [game.last.f, game.last.t] : [];
+  // the suggested move, shown as soon as it is known (a known win's next move is known while the planner still searches)
+  const hint = mode === 'game' && (game.phase === 'ours' || game.phase === 'thinking') && game.suggestion ? game.suggestion : null;
   const sel = mode === 'game' ? game.selected : null;
   const targets = sel == null ? [] : game.legal.filter(m => m.f === sel).map(m => m.t);
   $('board').replaceChildren(...squares.map((c, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = (((i >> 3) + (i & 7)) % 2 ? 'd' : 'l') + (hl.includes(i) ? ' hl' : '') + (sel === i ? ' sel' : '') +
+    b.className = (((i >> 3) + (i & 7)) % 2 ? 'd' : 'l') + (hl.includes(i) ? ' hl' : '') + (sel === i ? ' sel' : '') + (hint && (hint.f === i || hint.t === i) ? ' hint' : '') +
       (targets.includes(i) ? ' target' + (c !== '.' ? ' occ' : '') : '') + (mode === 'setup' && edit.doubt.includes(i) ? ' doubt' : '');
     b.setAttribute('aria-label', sqName(i) + (c === '.' ? ' empty' : ` ${c === c.toUpperCase() ? 'white' : 'black'} ${NAME[c.toLowerCase()]}`));
     if (c !== '.') b.append(pieceSpan(c));
@@ -359,7 +362,7 @@ function renderBoard() {
     return b;
   }));
   let svg = '';
-  if (mode === 'game' && game.phase === 'ours' && game.suggestion) svg = arrow(game.suggestion, 'ours');
+  if (hint) svg = arrow(hint, 'ours');
   if (mode === 'game' && game.phase === 'reply' && game.predicted) svg = arrow(game.predicted, 'reply');
   $('arrows').innerHTML = svg;
 }
