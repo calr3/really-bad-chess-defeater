@@ -6,7 +6,7 @@
 <title>Really Bad Chess Defeater</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Symbols+2&display=swap">
 <style>
   /* Layout: board on the left, setup or game panel on the right; stacks to one column on phones. */
   :root {
@@ -65,7 +65,8 @@
   #board .sel::after { background: var(--sel); }
   #board .target::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); z-index: 2; }
   #board .target.occ::before { width: 86%; height: 86%; background: transparent; border: 4px solid var(--dot); box-sizing: border-box; }
-  .pc { position: relative; z-index: 1; }
+  /* A real chess font, and text (not emoji) presentation: phones otherwise draw the pawn as an emoji. */
+  .pc { position: relative; z-index: 1; font-family: "Noto Sans Symbols 2", "Segoe UI Symbol", "DejaVu Sans", sans-serif; font-variant-emoji: text; }
   .pc.w { color: var(--piece-w); -webkit-text-stroke: 1.2px var(--piece-edge); paint-order: stroke fill; }
   .pc.b { color: var(--piece-b); }
   #arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
@@ -331,7 +332,7 @@ function editorChanged() { edit.full = null; $('setupError').hidden = true; rend
 function pieceSpan(c) {
   const s = document.createElement('span');
   s.className = 'pc ' + (c === c.toUpperCase() ? 'w' : 'b');
-  s.textContent = GLYPH[c.toLowerCase()];
+  s.textContent = GLYPH[c.toLowerCase()] + '\uFE0E'; // text presentation selector
   return s;
 }
 function arrow(m, cls) {
