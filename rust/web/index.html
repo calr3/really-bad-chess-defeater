@@ -241,7 +241,7 @@
           </table>
           <div id="empty" class="empty">No moves yet.</div>
         </div>
-        <p class="note">After the engine replies in the game, you can read a screenshot (or paste one) instead of tapping the moves in. The page works out your move and the engine's reply from it.</p>
+        <p class="note">The engine's reply is filled in as soon as you enter your move, since the model predicts it exactly. If the game shows a different reply, press Undo and tap the move it played, or read a screenshot of the game (or paste one): the page works out the moves from it.</p>
         <p class="note">The planner models the game's engine exactly, so its prediction of each reply should match what the game plays. If a reply differs, check the board: a misplaced piece or wrong castling rights changes the engine's choice.</p>
       </div>
     </div>
@@ -444,6 +444,10 @@ function renderGame() {
       actions.append(button('Suggest a move', think, 'btn'));
     }
   }
+  if (g.autoReply && (g.phase === 'thinking' || g.phase === 'ours')) {
+    hint.textContent = (hint.textContent ? hint.textContent + ' ' : '') +
+      `The engine's reply ${mvText(g.autoReply)} was filled in as predicted. If the game played something else, press Undo and tap its move, or read a screenshot.`;
+  }
   if (g.phase === 'predicting') { setPill('reply', "Engine's move"); say.textContent = 'Working out the engine\'s reply…'; }
   if (g.phase === 'reply') {
     setPill('reply', "Engine's move");
@@ -575,9 +579,10 @@ async function predict() {
     if (r) { const [f, t] = r.split('-').map(Number); g.predicted = { f, t }; }
   } catch (e) { if (e.message === 'stopped') return; g.warn = e.message; }
   g.phase = 'reply'; render();
-  if ($('auto').checked && g.predicted) setTimeout(() => game === g && g.phase === 'reply' && commit(g.predicted), 400);
+  // Play the predicted reply straight away, unless the user went back to enter a different one.
+  if (g.predicted && !g.noAutoReply) commit(g.predicted, true);
 }
-async function commit(m) {
+async function commit(m, auto = false) {
   const g = game;
   if (g.phase !== 'ours' && g.phase !== 'reply') return;
   const white = g.state.split(' ')[1] === 'w';
@@ -590,12 +595,15 @@ async function commit(m) {
   if (white) {
     const followed = same(m, g.suggestion);
     g.ours = { f: m.f, t: m.t };
+    g.autoReply = null;
     g.log.push({ n: g.log.length + 1, ours: { f: m.f, t: m.t, win: followed ? g.suggestion.win : null, own: !!g.suggestion && !followed }, reply: null });
   } else {
     const off = g.predicted && !same(m, g.predicted) ? { ...g.predicted } : null;
     let e = g.log[g.log.length - 1];
     if (!e || e.reply) { e = { n: g.log.length + 1, ours: null, reply: null }; g.log.push(e); }
     e.reply = { f: m.f, t: m.t, off };
+    g.autoReply = auto ? { f: m.f, t: m.t } : null;
+    g.noAutoReply = false;
     if (off) g.warn = `The model expected ${mvText(off)}, but you entered ${mvText(m)}. If that is what the game played, the board here probably differs from the game's (a piece, or castling rights). The planner carries on from the position you entered.`;
     if (g.ours) {
       try {
@@ -614,7 +622,8 @@ async function undo() {
   if (!g.undo.length) return;
   if (g.phase === 'thinking' || g.phase === 'predicting') startWorker();
   Object.assign(g, JSON.parse(g.undo.pop()));
-  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null;
+  g.warn = null; g.phase = 'busy'; g.suggestion = g.predicted = null; g.autoReply = null;
+  g.noAutoReply = g.state.split(' ')[1] === 'b'; // back at the engine's move: let the user enter it
   render();
   try { await newPlanner(); } catch (e) { return showError(e.message); } // the old plan may no longer apply
   await advance();
@@ -681,14 +690,29 @@ async function shotToEditor(file) {
 }
 async function shotToGame(file) {
   const g = game;
-  if (g.phase !== 'ours' && g.phase !== 'reply') return showError('Wait for the planner to finish thinking, then read the screenshot.');
+  if (!['ours', 'reply', 'thinking'].includes(g.phase)) return showError('Wait a moment, then read the screenshot again.');
   let r, path;
+  try { r = await readShot(file); } catch (e) { return showError(e.message); }
+  if (game !== g) return;
+  if (r.squares === g.state.split(' ')[0]) { g.warn = 'That screenshot shows the position already on the board here, so there is nothing new to enter.'; return render(); }
+  if (g.phase === 'thinking') stopThinking(); // the worker is busy while the planner thinks
   try {
-    r = await readShot(file);
     path = await call('match', { state: g.state, target: r.squares });
+    if (path === null && g.autoReply) {
+      // The engine's reply was filled in as predicted; see whether the game played another one.
+      const before = JSON.parse(g.undo[g.undo.length - 1]);
+      const alt = await call('match', { state: before.state, target: r.squares });
+      if (alt && alt.length === 1) {
+        const predicted = g.autoReply;
+        Object.assign(g, before);
+        g.autoReply = null; g.suggestion = null; g.predicted = predicted; g.phase = 'reply'; g.undo.pop();
+        path = alt;
+      }
+    }
   } catch (e) { return showError(e.message); }
   if (game !== g) return;
   if (path === null) return showError("That screenshot isn't one or two moves on from the position here. If the board has drifted, press Edit board and read the screenshot there.");
+  if (path.length === 2) g.noAutoReply = true; // the screenshot shows the engine's reply: use that one
   if (!path.length) { g.warn = 'That screenshot shows the position already on the board here, so there is nothing new to enter.'; return render(); }
   for (let k = 0; k < path.length; k++) {
     const done = commit(path[k]);
