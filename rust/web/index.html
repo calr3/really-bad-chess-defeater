@@ -137,6 +137,7 @@
   td { padding: 5px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   tr:last-child td { border-bottom: 0; }
   td.n { color: var(--muted); }
+  th.num, td.num { text-align: right; }
   td .off { color: var(--reply); }
   .empty { padding: 14px 12px; color: var(--muted); font: 14px var(--body); }
 </style>
@@ -236,7 +237,7 @@
         </div>
         <div class="moves">
           <table>
-            <thead><tr><th>#</th><th>White (you)</th><th>Black (engine)</th></tr></thead>
+            <thead><tr><th>#</th><th>White (you)</th><th>Black (engine)</th><th class="num" title="Material, White minus Black: pawn 1, knight and bishop 3, rook 5, queen 9">Material</th></tr></thead>
             <tbody id="log"></tbody>
           </table>
           <div id="empty" class="empty">No moves yet.</div>
@@ -254,6 +255,10 @@ const START = 'rnbqkbnrpppppppp................................PPPPPPPPRNBQKBNR'
 const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const NAME = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
 const $ = id => document.getElementById(id);
+// Material balance from White's side with the usual values (pawn 1, knight 3, bishop 3, rook 5, queen 9).
+const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const material = state => [...state.split(' ')[0]].reduce((sum, c) => c === '.' ? sum : sum + (c === c.toUpperCase() ? 1 : -1) * VALUE[c.toLowerCase()], 0);
+const signed = v => v > 0 ? '+' + v : v < 0 ? '−' + -v : '0';
 const sqName = i => 'abcdefgh'[i & 7] + (8 - (i >> 3));
 const mvText = m => `${sqName(m.f)}–${sqName(m.t)}`;
 const same = (a, b) => !!a && !!b && a.f === b.f && a.t === b.t;
@@ -476,6 +481,9 @@ function renderGame() {
     td(String(e.n), 'n');
     td(e.ours ? mvText(e.ours) + (e.ours.win ? ` <span class="win">win in ${e.ours.win}</span>` : '') + (e.ours.own ? ' <span class="off">(own)</span>' : '') : '…');
     td(e.reply ? mvText(e.reply) + (e.reply.off ? ` <span class="off">(expected ${mvText(e.reply.off)})</span>` : '') : '');
+    // after White's move and, if Black's reply changed it, after Black's
+    const a = e.ours?.mat, b = e.reply?.mat;
+    td(a != null && b != null && a !== b ? `${signed(a)} → ${signed(b)}` : signed(b ?? a ?? 0), 'num');
     return tr;
   }));
   $('log').lastElementChild?.scrollIntoView({ block: 'nearest' });
@@ -599,12 +607,12 @@ async function commit(m, auto = false) {
     const followed = same(m, g.suggestion);
     g.ours = { f: m.f, t: m.t };
     g.autoReply = null;
-    g.log.push({ n: g.log.length + 1, ours: { f: m.f, t: m.t, win: followed ? g.suggestion.win : null, own: !!g.suggestion && !followed }, reply: null });
+    g.log.push({ n: g.log.length + 1, ours: { f: m.f, t: m.t, win: followed ? g.suggestion.win : null, own: !!g.suggestion && !followed, mat: material(next) }, reply: null });
   } else {
     const off = g.predicted && !same(m, g.predicted) ? { ...g.predicted } : null;
     let e = g.log[g.log.length - 1];
     if (!e || e.reply) { e = { n: g.log.length + 1, ours: null, reply: null }; g.log.push(e); }
-    e.reply = { f: m.f, t: m.t, off };
+    e.reply = { f: m.f, t: m.t, off, mat: material(next) };
     g.autoReply = auto ? { f: m.f, t: m.t } : null;
     g.noAutoReply = false;
     if (off) g.warn = `The model expected ${mvText(off)}, but you entered ${mvText(m)}. If that is what the game played, the board here probably differs from the game's (a piece, or castling rights). The planner carries on from the position you entered.`;
