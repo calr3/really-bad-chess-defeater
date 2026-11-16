@@ -77,7 +77,9 @@ p.planLine();                           // the win being followed, "f-t f-t ..."
 p.setPlanLine(line);                    // restore it, e.g. into a new Planner
 ```
 
-The web UI (`web/`) is for playing along with a real game: set up the board the game shows (or
+The web UI (`web/`) is published to GitHub Pages at
+https://calr3.github.io/really-bad-chess-defeater/ by `.github/workflows/pages.yml` on every push
+to `main` or `rust-port`. It is for playing along with a real game: set up the board the game shows (or
 load a ranked board by seed), and it suggests each White move, predicts the engine's reply, and
 lets you enter what the game actually played by tapping squares. It can also auto-play both sides.
 It can read the board from a screenshot of the game (`web/vision.js`: piece silhouettes matched
