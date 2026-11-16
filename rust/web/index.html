@@ -425,7 +425,7 @@ function renderGame() {
       say.innerHTML = `Play the ${describe(g.state, s)}<span class="mv">${mvText(s)}</span><br><span class="win">Forced win in ${s.win} move${s.win > 1 ? 's' : ''}</span>`;
       $('phaseText').textContent = 'looking for a faster win';
       actions.append(button('Play it now', () => { stopThinking(); commit(game.suggestion); }, 'btn big'));
-      hint.textContent = 'This is the next move of the win already found. The planner is checking for a faster one, and suggests this move again if it finds none. You can play it without waiting.';
+      hint.textContent = 'Press Space to play it now. This is the next move of the win already found. The planner is checking for a faster one, and suggests this move again if it finds none. You can play it without waiting.';
     } else {
       $('phaseText').textContent = 'thinking';
       say.textContent = 'The planner is looking for the fastest win…';
@@ -440,7 +440,7 @@ function renderGame() {
         (s.win ? `<br><span class="win">${s.faster ? 'Found a faster win: ' : 'Forced win in '}${s.win} move${s.win > 1 ? 's' : ''}</span>` : '');
       $('phaseText').textContent = s.secs == null ? 'from the win found earlier' : `${s.secs.toFixed(1)} s`;
       actions.append(button('Done, I played it', () => commit(s), 'btn big'));
-      hint.textContent = 'Played something else? Tap that move on the board instead.';
+      hint.textContent = 'Press Space for “Done, I played it”. Played something else? Tap that move on the board instead.';
     } else {
       say.textContent = 'Enter the move you played on the board.';
       actions.append(button('Suggest a move', think, 'btn'));
@@ -456,7 +456,7 @@ function renderGame() {
     if (g.predicted) {
       say.innerHTML = `The engine should reply with the ${describe(g.state, g.predicted)}<span class="mv">${mvText(g.predicted)}</span>`;
       actions.append(button('Engine played that', () => commit(g.predicted), 'btn big'));
-      hint.textContent = 'If the game played something else, tap that move on the board.';
+      hint.textContent = 'Press Space for “Engine played that”. If the game played something else, tap that move on the board.';
     } else {
       say.textContent = "Enter Black's move on the board.";
     }
@@ -772,6 +772,17 @@ setInterval(() => {
   $('progressFill').parentElement.setAttribute('aria-valuenow', Math.round(frac * 100));
   $('progressText').textContent = frac < 1 ? `${Math.ceil(g.thinkSecs - used)} s left of ${g.thinkSecs} s` : 'Finishing…';
 }, 250);
+// Space confirms the move on offer: ours (also while the planner looks for a faster win), or the engine's.
+document.addEventListener('keydown', e => {
+  if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey || mode !== 'game') return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  e.preventDefault(); // no scrolling, and no click on a focused button
+  if (e.repeat) return;
+  const g = game;
+  if (g.phase === 'thinking' && g.suggestion) { stopThinking(); commit(game.suggestion); }
+  else if (g.phase === 'ours' && g.suggestion) commit(g.suggestion);
+  else if (g.phase === 'reply' && g.predicted) commit(g.predicted);
+});
 window.addEventListener('unhandledrejection', e => showError(String(e.reason?.message ?? e.reason)));
 render();
 startWorker();
