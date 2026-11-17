@@ -4,6 +4,11 @@ This directory holds a reverse-engineered C# port of the chess AI of *Really Bad
 Android, version 1.4.18 (`com.noodlecake.reallybadchess`). It also has an engine that wins
 against that AI by exploiting its exact behaviour.
 
+**Try it in the browser: <https://calr3.github.io/really-bad-chess-defeater/>.** Set up the board
+from your game and the page suggests your moves and predicts the AI's replies. It runs a
+Rust/WebAssembly port of the engine, built from `rust/` on the `rust-port` branch and published
+to GitHub Pages by `.github/workflows/pages.yml`.
+
 The APK is not included. To regenerate the analysis outputs, supply your own copy as
 `baseapk.apk`:
 
